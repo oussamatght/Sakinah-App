@@ -47,7 +47,7 @@ async function main() {
 
   console.log("— Hadith list (cat 2):");
   const hadithPage = await fetchHadithList("2", 1, 2);
-  console.log("  items:", hadithPage.items.length, "| text?", Boolean(hadithPage.items[0]?.text), "| source:", hadithPage.items[0]?.source);
+  console.log("  items:", hadithPage.items.length, "| text?", Boolean(hadithPage.items[0]?.text), "| book:", hadithPage.items[0]?.book);
 
   console.log("— Hadith categories:");
   const cats = await fetchHadithCategories();

@@ -40,4 +40,5 @@ export const storageKeys = {
   readingPosition: "reading.position.v1",
   settings: "settings.v1",
   tasbih: "tasbih.history.v1",
+  prayerTimes: "prayer.times.cache.v1",
 } as const;

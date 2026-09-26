@@ -18,6 +18,9 @@ import {
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { initThemePreference } from '@/hooks/useTheme';
+import { configureNotificationHandler } from '@/lib/notifications/adhan';
+import { getSettings, getPrayerTimesCache } from '@/lib/storage';
+import { scheduleAdhanNotifications } from '@/lib/notifications/adhan';
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 void SplashScreen.preventAutoHideAsync();
@@ -77,6 +80,32 @@ export default function RootLayout() {
 
   useEffect(() => {
     void initThemePreference();
+  }, []);
+
+  // Task 10: adhan scheduling — rescheduled on EVERY app open because prayer
+  // times shift daily. Only when the settings switch is on. Fails silently
+  // under Expo Go (see lib/notifications/adhan.ts).
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    configureNotificationHandler();
+    void (async () => {
+      try {
+        const appSettings = await getSettings();
+        if (!appSettings.prayerNotifications) return;
+        const cached = await getPrayerTimesCache();
+        if (cached) {
+          await scheduleAdhanNotifications({
+            date: cached.date,
+            hijriDate: cached.hijriDate,
+            timezone: '—',
+            location: cached.location,
+            timings: cached.timings,
+          });
+        }
+      } catch {
+        // Notifications are best-effort; never block startup.
+      }
+    })();
   }, []);
 
   useEffect(() => {

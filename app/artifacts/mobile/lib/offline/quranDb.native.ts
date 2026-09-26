@@ -1,5 +1,5 @@
 import { Platform } from "react-native";
-import * as SQLite from "expo-sqlite";
+import { openDatabaseSync, type SQLiteDatabase } from "expo-sqlite";
 import type {
   QuranChapter,
   QuranJuz,
@@ -9,29 +9,37 @@ import type {
 } from "@/lib/api/types";
 
 /**
- * Offline Quran store (Task 5) — SQLite via expo-sqlite.
+ * Offline Quran store (Task 5 — native) — SQLite via expo-sqlite.
  *
- * Size rationale: the full Uthmani text is ~1.6–2.5MB across 6,236 ayahs —
- * above what AsyncStorage should hold (Android LSM ~6MB total app limit),
- * so a relational local store is the right fit.
+ * Import point (verified against node_modules/expo-sqlite/build):
+ *   index.d.ts re-exports ./SQLiteDatabase, which declares both
+ *   openDatabaseSync (l.358) and openDatabaseAsync (l.348). So
+ *   `import { openDatabaseSync } from 'expo-sqlite'` is the correct import.
  *
- * Schema (mirrors the API data model):
+ * Sync vs Async policy:
+ *   - *Sync: fast point reads (one surah / one ayah / one tafsir row) — safe
+ *     because they touch a handful of indexed rows.
+ *   - *Async: the initial 114-surah download (thousands of inserts + network
+ *     batches) so the JS thread stays responsive and progress updates render.
+ *
+ * Resume semantics: each surah is committed in its own async transaction and
+ * recorded in meta('quran.surah.'+id). An interrupted download skips surahs
+ * already stored and continues where it stopped.
+ *
+ * Schema (surahId+number PK, index on juz; chapters carry the page ranges):
  *   chapters(id, nameArabic, nameEnglish, revelationPlace, versesCount)
- *   ayahs(surahId, number, text, juz, page)  — surahId+number = PK
+ *   verses(surahId, number, text, juz, page)
  *   tafsir(surahId, ayahNumber, resourceName, text) — on-demand cache
- *
- * Web note: expo-sqlite falls back to SQLite WASM on web; everything is
- * guarded so a failure degrades to online-only mode without crashing.
  */
 
 const DB_NAME = "sakinah-quran.db";
 
-let dbInstance: SQLite.SQLiteDatabase | null = null;
+let dbInstance: SQLiteDatabase | null = null;
 
-function getDb(): SQLite.SQLiteDatabase | null {
+function getDb(): SQLiteDatabase | null {
   if (dbInstance) return dbInstance;
   try {
-    dbInstance = SQLite.openDatabaseSync(DB_NAME);
+    dbInstance = openDatabaseSync(DB_NAME);
     dbInstance.execSync(`
       PRAGMA journal_mode = WAL;
       CREATE TABLE IF NOT EXISTS chapters (
@@ -41,7 +49,7 @@ function getDb(): SQLite.SQLiteDatabase | null {
         revelationPlace TEXT NOT NULL,
         versesCount INTEGER NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS ayahs (
+      CREATE TABLE IF NOT EXISTS verses (
         surahId INTEGER NOT NULL,
         number INTEGER NOT NULL,
         text TEXT NOT NULL,
@@ -49,7 +57,8 @@ function getDb(): SQLite.SQLiteDatabase | null {
         page INTEGER NOT NULL,
         PRIMARY KEY (surahId, number)
       );
-      CREATE INDEX IF NOT EXISTS idx_ayahs_juz ON ayahs(juz);
+      CREATE INDEX IF NOT EXISTS idx_verses_surah ON verses(surahId);
+      CREATE INDEX IF NOT EXISTS idx_verses_juz ON verses(juz);
       CREATE TABLE IF NOT EXISTS tafsir (
         surahId INTEGER NOT NULL,
         ayahNumber INTEGER NOT NULL,
@@ -86,11 +95,25 @@ export function getOfflineQuranState(): DownloadState {
       "SELECT value FROM meta WHERE key = 'quran.downloadedAt'",
     );
     const count = db.getFirstSync<{ total: number }>(
-      "SELECT COUNT(*) as total FROM ayahs",
+      "SELECT COUNT(*) as total FROM verses",
     );
     return { downloadedAt: row?.value ?? null, ayahCount: count?.total ?? 0 };
   } catch {
     return { downloadedAt: null, ayahCount: 0 };
+  }
+}
+
+/** How many surahs are fully stored so far (resume UI). */
+export function getStoredSurahCount(): number {
+  const db = getDb();
+  if (!db) return 0;
+  try {
+    const row = db.getFirstSync<{ total: number }>(
+      "SELECT COUNT(*) as total FROM meta WHERE key LIKE 'quran.surah.%'",
+    );
+    return row?.total ?? 0;
+  } catch {
+    return 0;
   }
 }
 
@@ -129,16 +152,18 @@ function stripLeadingBismillah(text: string): string {
 }
 
 export type DownloadProgress = {
-  phase: "chapters" | "surahs";
+  /** Stored surahs after the current batch (drives "سورة X من 114"). */
   done: number;
   total: number;
+  /** Overall percentage including the current batch midpoint. */
+  percent: number;
 };
 
 /**
- * Downloads the whole Quran (chapters + 114 surahs, Uthmani). Surah requests
- * run in small batches to stay gentle on the free API; each surah commits as
- * it lands so an interrupted download can resume (already-filled surahs are
- * skipped via the meta marker per surah).
+ * Downloads the whole Quran (chapters + 114 Uthmani surahs) using the ASYNC
+ * API end-to-end. Surahs are fetched in small parallel batches; each batch is
+ * committed with withTransactionAsync, and each stored surah is marked in
+ * meta so an interrupted download resumes instead of restarting.
  */
 export async function downloadQuran(
   fetchSurah: (surahId: number) => Promise<QuranSurah>,
@@ -148,11 +173,12 @@ export async function downloadQuran(
   const db = getDb();
   if (!db) throw new Error("التخزين المحلي غير متاح على هذا الجهاز");
 
+  // 1) Chapters list (single small table — sync-safe size, but run async).
   const chapters = await fetchChapters();
-  db.execSync("DELETE FROM chapters;");
-  db.withTransactionSync(() => {
+  await db.withTransactionAsync(async () => {
+    await db.runAsync("DELETE FROM chapters");
     for (const chapter of chapters) {
-      db.runSync(
+      await db.runAsync(
         "INSERT OR REPLACE INTO chapters (id, nameArabic, nameEnglish, revelationPlace, versesCount) VALUES (?, ?, ?, ?, ?)",
         chapter.id,
         chapter.nameArabic,
@@ -162,48 +188,70 @@ export async function downloadQuran(
       );
     }
   });
-  onProgress?.({ phase: "chapters", done: 1, total: 1 });
 
-  let inserted = 0;
+  // 2) Surahs in parallel batches, committed per batch (resume-safe).
+  const stored = new Set(
+    (
+      await db.getAllAsync<{ key: string }>(
+        "SELECT key FROM meta WHERE key LIKE 'quran.surah.%'",
+      )
+    ).map((row) => Number(row.key.slice("quran.surah.".length))),
+  );
+
+  const pending: number[] = [];
+  for (let surahId = 1; surahId <= 114; surahId += 1) {
+    if (!stored.has(surahId)) pending.push(surahId);
+  }
+
   const BATCH = 6;
-  for (let start = 1; start <= 114; start += BATCH) {
-    const end = Math.min(start + BATCH - 1, 114);
-    const surahs = await Promise.all(
-      Array.from({ length: end - start + 1 }, (_, index) => start + index).map(
-        (surahId) => fetchSurah(surahId),
-      ),
-    );
-    db.withTransactionSync(() => {
+  let ayahCount =
+    getOfflineQuranState().ayahCount - (stored.size === 114 ? 0 : 0);
+  let done = stored.size;
+
+  for (let start = 0; start < pending.length; start += BATCH) {
+    const batchIds = pending.slice(start, start + BATCH);
+    // Network first (parallel), then one async transaction per batch.
+    const surahs = await Promise.all(batchIds.map((id) => fetchSurah(id)));
+    await db.withTransactionAsync(async () => {
       for (const surah of surahs) {
-        db.runSync(
-          "INSERT OR REPLACE INTO meta (key, value) VALUES ('quran.surah.' || ?, '1')",
-          surah.id,
-        );
         for (const verse of surah.verses) {
-          db.runSync(
-            "INSERT OR REPLACE INTO ayahs (surahId, number, text, juz, page) VALUES (?, ?, ?, ?, ?)",
+          const text =
+            verse.verseNumber === 1 && surah.id !== 1 && surah.id !== 9
+              ? stripLeadingBismillah(verse.text)
+              : verse.text;
+          await db.runAsync(
+            "INSERT OR REPLACE INTO verses (surahId, number, text, juz, page) VALUES (?, ?, ?, ?, ?)",
             surah.id,
             verse.verseNumber,
-            verse.text,
+            text,
             verse.juz,
             verse.page,
           );
-          inserted += 1;
         }
+        await db.runAsync(
+          "INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')",
+          `quran.surah.${surah.id}`,
+        );
+        ayahCount += surah.verses.length;
+        done += 1;
       }
     });
-    onProgress?.({ phase: "surahs", done: end, total: 114 });
+    onProgress?.({
+      done,
+      total: 114,
+      percent: Math.round((done / 114) * 100),
+    });
   }
 
-  db.runSync(
+  await db.runAsync(
     "INSERT OR REPLACE INTO meta (key, value) VALUES ('quran.downloadedAt', ?)",
     new Date().toISOString(),
   );
-  return { ayahCount: inserted };
+  return { ayahCount };
 }
 
 // ---------------------------------------------------------------------------
-// Local reads — same shapes the API fetchers return
+// Local reads — SYNC (fast point reads), same shapes the API fetchers return
 // ---------------------------------------------------------------------------
 
 export function getLocalChapters(): QuranChapter[] | null {
@@ -242,7 +290,7 @@ export function getLocalSurah(surahId: number): QuranSurah | null {
       juz: number;
       page: number;
     }>(
-      "SELECT number, text, juz, page FROM ayahs WHERE surahId = ? ORDER BY number",
+      "SELECT number, text, juz, page FROM verses WHERE surahId = ? ORDER BY number",
       surahId,
     );
     if (rows.length === 0) return null;
@@ -269,17 +317,23 @@ export function getLocalJuz(juz: number): QuranJuz | null {
       number: number;
       text: string;
       page: number;
-      nameArabic: string;
+      nameArabic: string | null;
     }>(
-      `SELECT a.surahId, a.number, a.text, a.page, c.nameArabic
-       FROM ayahs a LEFT JOIN chapters c ON c.id = a.surahId
-       WHERE a.juz = ? ORDER BY a.surahId, a.number`,
+      `SELECT v.surahId, v.number, v.text, v.page, c.nameArabic
+       FROM verses v LEFT JOIN chapters c ON c.id = v.surahId
+       WHERE v.juz = ? ORDER BY v.surahId, v.number`,
       juz,
     );
     if (rows.length === 0) return null;
     const ranges = new Map<
       number,
-      { surahId: number; nameArabic: string; fromAyah: number; toAyah: number; startPage: number }
+      {
+        surahId: number;
+        nameArabic: string;
+        fromAyah: number;
+        toAyah: number;
+        startPage: number;
+      }
     >();
     for (const row of rows) {
       const existing = ranges.get(row.surahId);
@@ -324,13 +378,10 @@ export function getLocalTafsir(
   const db = getDb();
   if (!db) return null;
   try {
-    const row = db.getFirstSync<{
-      surahId: number;
-      ayahNumber: number;
-      resourceName: string;
-      text: string;
-    }>(
-      "SELECT * FROM tafsir WHERE surahId = ? AND ayahNumber = ?",
+    const row = db.getFirstSync<
+      { surahId: number; ayahNumber: number; resourceName: string; text: string }
+    >(
+      "SELECT surahId, ayahNumber, resourceName, text FROM tafsir WHERE surahId = ? AND ayahNumber = ?",
       surahId,
       ayahNumber,
     );
@@ -356,7 +407,7 @@ export function storeLocalTafsir(tafsir: QuranTafsir): void {
   }
 }
 
-/** True when the whole Quran is stored locally on this device. */
+/** True on native, where the SQLite store is available. */
 export function offlineSupported(): boolean {
-  return Platform.OS !== "web" || getDb() !== null;
+  return Platform.OS === "ios" || Platform.OS === "android";
 }

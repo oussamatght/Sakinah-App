@@ -11,6 +11,7 @@ import {
   LoadingState,
   Screen,
 } from '@/components/ui';
+import { FavoriteButton } from '@/components/FavoriteButton';
 import { radii, spacing, typography } from '@/constants/tokens';
 import { useColors } from '@/hooks/useColors';
 
@@ -63,9 +64,29 @@ export default function QuranReader() {
   }
 
   if (readerQuery.isError || !readerQuery.data) {
+    // Fix 9: a failed saved-position open must not strand the user on a dead
+    // end — offer going straight to the surah list (the Quran tab).
     return (
       <Screen>
+        <IconButton icon="arrow-right" label="العودة" onPress={() => router.back()} variant="soft" />
         <ErrorState offline={isOfflineError(readerQuery.error)} onRetry={() => void readerQuery.refetch()} />
+        <Text style={[styles.fallbackHint, { color: colors.mutedForeground }]}>
+          تعذر فتح آخر موضع، جرّب اختيار سورة
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="الذهاب إلى قائمة السور"
+          onPress={() => router.replace('/(tabs)/quran')}
+          style={({ pressed }) => [
+            styles.surahListButton,
+            { backgroundColor: colors.primary, opacity: pressed ? 0.85 : 1 },
+          ]}
+        >
+          <Feather name="list" size={17} color={colors.primaryForeground} />
+          <Text style={[styles.surahListText, { color: colors.primaryForeground }]}>
+            اختيار سورة
+          </Text>
+        </Pressable>
       </Screen>
     );
   }
@@ -147,6 +168,15 @@ export default function QuranReader() {
               <Text style={[styles.ayahNumberText, { color: colors.primary }]}>{ayah.verseNumber}</Text>
             </View>
             <Text style={[styles.ayahText, { color: colors.foreground }]}>{ayah.text}</Text>
+            <FavoriteButton
+              item={{
+                kind: 'ayah',
+                refId: ayah.verseKey,
+                title: `${surahData.nameArabic} — آية ${ayah.verseNumber}`,
+                text: ayah.text,
+                subtitle: `${surahData.nameArabic} : ${ayah.verseNumber}`,
+              }}
+            />
           </Pressable>
         ))
       )}
@@ -228,6 +258,9 @@ const styles = StyleSheet.create({
   ayahNumber: { alignItems: 'center', borderRadius: radii.pill, height: 28, justifyContent: 'center', marginTop: 5, width: 28 },
   ayahNumberText: { fontSize: typography.caption, fontWeight: '700' },
   ayahText: { flex: 1, fontSize: typography.quranLarge, lineHeight: 50, textAlign: 'right' },
+  fallbackHint: { fontSize: typography.bodySmall, marginTop: spacing.sm, textAlign: 'center' },
+  surahListButton: { alignItems: 'center', alignSelf: 'center', borderRadius: radii.pill, flexDirection: 'row-reverse', gap: 6, paddingHorizontal: spacing.lg, paddingVertical: 11 },
+  surahListText: { fontSize: typography.bodySmall, fontWeight: '700' },
   tafsirCard: { borderRadius: radii.sm, marginTop: spacing.lg, padding: spacing.md },
   sheetBackdrop: { backgroundColor: 'rgba(0,0,0,0.45)', flex: 1, justifyContent: 'flex-end' },
   sheet: {

@@ -68,14 +68,23 @@ export type QuranTafsir = {
   text: string;
 };
 
+/**
+ * Unified hadith shape (project-wide):
+ *   book        — الشرعي: اسم الكتاب ("صحيح البخاري")، أو اسم التصنيف/الموسوعة
+ *                 للمصادر الموضوعية. Never the technical API provider name.
+ *   reference   — رقم الحديث داخل الكتاب ("4607") أو التخريج المصدر.
+ *   grade       — الدرجة كما وردت من المصدر بلا تحوير ("صحيح"…).
+ *   attribution — الراوي/من رواه، إن توفر.
+ *   apiSource   — تقني للتصحيح فقط ("hadeethenc.com")؛ لا تُعرض في الواجهة أبدًا.
+ */
 export type HadithItem = {
   id: string;
-  title: string;
   text: string;
-  source: string;
-  attribution?: string;
+  book: string;
+  reference: string;
   grade?: string;
-  reference?: string;
+  attribution?: string;
+  apiSource?: string;
 };
 
 export type HadithPage = {

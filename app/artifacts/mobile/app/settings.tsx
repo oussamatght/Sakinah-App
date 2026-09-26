@@ -8,7 +8,12 @@ import { radii, spacing, typography } from '@/constants/tokens';
 import { useColors } from '@/hooks/useColors';
 import { useSettings } from '@/hooks/useAppState';
 import { setThemePreference } from '@/hooks/useTheme';
-import { FONT_SCALES, RECITERS, type ThemePreference } from '@/lib/storage';
+import { FONT_SCALES, RECITERS, getPrayerTimesCache, type ThemePreference } from '@/lib/storage';
+import {
+  cancelAdhanNotifications,
+  playAdhanTestNotification,
+  scheduleAdhanNotifications,
+} from '@/lib/notifications/adhan';
 
 const THEME_OPTIONS: Array<{ key: ThemePreference; label: string }> = [
   { key: 'light', label: 'فاتح' },
@@ -29,21 +34,50 @@ export default function SettingsScreen() {
   const { settings, ready, save } = useSettings();
   const [notifError, setNotifError] = useState<string | null>(null);
 
-  // Ask for notification permission when the toggle is first enabled.
+  // Ask for notification permission when the toggle is first enabled, and
+  // reschedule (or cancel) the adhan notifications to match the switch.
   useEffect(() => {
-    if (ready && settings.prayerNotifications && Platform.OS !== 'web') {
-      void (async () => {
+    if (!ready || Platform.OS === 'web') return;
+    void (async () => {
+      if (settings.prayerNotifications) {
         const existing = await Notifications.getPermissionsAsync();
         if (!existing.granted && existing.canAskAgain) {
           const result = await Notifications.requestPermissionsAsync();
           if (!result.granted) {
             setNotifError('لم يُمنح إذن الإشعارات — فعّله من إعدادات الجهاز.');
             await save({ prayerNotifications: false });
+            return;
           }
         }
-      })();
-    }
+        // جدولة يومية: مواقيت اليوم من آخر كاش محفوظ (إن وجد) — والجدولة
+        // تعاد عند كل فتح للتطبيق لأن المواقيت تتغير يوميًا.
+        const cached = await getPrayerTimesCache();
+        if (cached) {
+          const result = await scheduleAdhanNotifications({
+            date: cached.date,
+            hijriDate: cached.hijriDate,
+            timezone: '—',
+            location: cached.location,
+            timings: cached.timings,
+          });
+          if (result.scheduled === 0 && result.reason) setNotifError(result.reason);
+          else setNotifError(null);
+        }
+      } else {
+        await cancelAdhanNotifications();
+      }
+    })();
   }, [ready, settings.prayerNotifications, save]);
+
+  const [testHint, setTestHint] = useState<string | null>(null);
+  const handleTestAdhan = async () => {
+    const ok = await playAdhanTestNotification();
+    setTestHint(
+      ok
+        ? 'سيظهر إشعار التجربة بعد ثانيتين — تأكد من سماع الأذان.'
+        : 'التجربة تتطلب development build (غير مدعومة في Expo Go).',
+    );
+  };
 
   if (!ready) {
     return (
@@ -143,26 +177,40 @@ export default function SettingsScreen() {
 
       <SectionTitle title="الصوت والإشعارات" />
       <View style={[styles.settingsGroup, { borderColor: colors.border }]}>
-        <View style={[styles.row, { borderBottomColor: colors.border }]}>
-          <View style={styles.rowCopy}>
-            <Text style={[styles.rowTitle, { color: colors.foreground }]}>القارئ الافتراضي</Text>
-            <Text style={[styles.rowMeta, { color: colors.mutedForeground }]}>
-              {RECITERS.find((reciter) => reciter.id === settings.reciterId)?.nameAr ?? '—'}
-            </Text>
+        <View style={[styles.row, { borderBottomColor: colors.border, flexDirection: 'column', alignItems: 'stretch', gap: spacing.sm, paddingVertical: spacing.md }]}>
+          <View style={styles.row}>
+            <View style={styles.rowCopy}>
+              <Text style={[styles.rowTitle, { color: colors.foreground }]}>القارئ الافتراضي</Text>
+              <Text style={[styles.rowMeta, { color: colors.mutedForeground }]}>
+                {RECITERS.find((reciter) => reciter.id === settings.reciterId)?.nameAr ?? '—'}
+              </Text>
+            </View>
           </View>
-          <View style={styles.reciterRow}>
-            {RECITERS.slice(0, 4).map((reciter) => (
+          <View style={styles.reciterChips}>
+            {RECITERS.map((reciter) => (
               <Pressable
                 key={reciter.id}
                 accessibilityRole="radio"
                 accessibilityState={{ selected: settings.reciterId === reciter.id }}
+                accessibilityLabel={`اختيار ${reciter.nameAr}`}
                 onPress={() => void save({ reciterId: reciter.id })}
                 style={[
-                  styles.reciterDot,
+                  styles.reciterChip,
                   { backgroundColor: colors.secondary },
                   settings.reciterId === reciter.id && { backgroundColor: colors.primary },
                 ]}
-              />
+              >
+                <Text
+                  numberOfLines={1}
+                  style={{
+                    color: settings.reciterId === reciter.id ? colors.primaryForeground : colors.primary,
+                    fontSize: 11,
+                    fontWeight: '700',
+                  }}
+                >
+                  {reciter.nameAr}
+                </Text>
+              </Pressable>
             ))}
           </View>
         </View>
@@ -170,7 +218,7 @@ export default function SettingsScreen() {
           <View style={styles.rowCopy}>
             <Text style={[styles.rowTitle, { color: colors.foreground }]}>تنبيهات الصلاة</Text>
             <Text style={[styles.rowMeta, { color: colors.mutedForeground }]}>
-              {notifError ?? 'تنبيه محلي عند دخول وقت كل صلاة'}
+              {notifError ?? 'أذان عند دخول وقت كل صلاة'}
             </Text>
           </View>
           <Switch
@@ -180,6 +228,27 @@ export default function SettingsScreen() {
             thumbColor={colors.card}
           />
         </View>
+        {settings.prayerNotifications ? (
+          <View style={styles.row}>
+            <View style={styles.rowCopy}>
+              <Text style={[styles.rowTitle, { color: colors.foreground }]}>تجربة صوت الأذان</Text>
+              <Text style={[styles.rowMeta, { color: colors.mutedForeground }]}>
+                {testHint ?? 'إشعار فوري للتأكد من عمل الصوت'}
+              </Text>
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="تشغيل تجربة صوت الأذان"
+              onPress={() => void handleTestAdhan()}
+              style={({ pressed }) => [
+                styles.linkButton,
+                { backgroundColor: colors.secondary, opacity: pressed ? 0.7 : 1 },
+              ]}
+            >
+              <Feather name="volume-2" size={16} color={colors.primary} />
+            </Pressable>
+          </View>
+        ) : null}
       </View>
 
       {notifError ? <ErrorState /> : null}
@@ -205,7 +274,7 @@ const styles = StyleSheet.create({
   fontButtons: { flexDirection: 'row-reverse', gap: 6 },
   fontButton: { alignItems: 'center', borderRadius: 8, height: 34, justifyContent: 'center', width: 34 },
   linkButton: { alignItems: 'center', borderRadius: radii.sm, height: 36, justifyContent: 'center', width: 36 },
-  reciterRow: { flexDirection: 'row-reverse', gap: 6 },
-  reciterDot: { borderRadius: 999, height: 14, width: 14 },
+  reciterChips: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 6 },
+  reciterChip: { borderRadius: 999, maxWidth: '48%', paddingHorizontal: 10, paddingVertical: 7 },
   privacy: { fontSize: typography.caption, marginTop: spacing.xl, textAlign: 'center' },
 });

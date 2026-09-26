@@ -10,7 +10,7 @@ async function main() {
   const page1 = await fetchBookHadiths("bukhari", 1, 5);
   console.log(`   items: ${page1.items.length} | total: ${page1.total} | hasMore: ${page1.hasMore}`);
   console.log(`   أول حديث: ${page1.items[0]?.text.slice(0, 60)}...`);
-  console.log(`   المصدر: ${page1.items[0]?.source}`);
+  console.log(`   المصدر: ${page1.items[0]?.book} — رقم ${page1.items[0]?.reference}`);
 
   console.log("— صفحة 2 (pagination):");
   const page2 = await fetchBookHadiths("bukhari", 2, 5);
@@ -25,7 +25,7 @@ async function main() {
   const list = await fetchHadithList("2", 1, 3);
   console.log(`   items: ${list.items.length} | total: ${list.total} | hasMore: ${list.hasMore}`);
   const sample = list.items[0];
-  console.log(`   العنوان: ${sample?.title} | الدرجة: ${sample?.grade ?? "—"} | الراوي: ${sample?.attribution ?? "—"}`);
+  console.log(`   الكتاب: ${sample?.book} | الدرجة: ${sample?.grade ?? "—"} | الراوي: ${sample?.attribution ?? "—"} | المرجع: ${sample?.reference}`);
   if (!sample?.text) throw new Error("hadith list item has no text");
 
   console.log("TASK3 DATA-PATH: ALL CHECKS PASSED");

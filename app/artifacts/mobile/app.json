@@ -4,13 +4,19 @@
     "slug": "mobile",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/icon2.png",
     "scheme": "mobile",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": false
     },
-    "android": {},
+    "android": {
+      "package": "com.sakinah.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/adaptive-icon.png",
+        "backgroundColor": "#F7F4EC"
+      }
+    },
     "web": {
       "favicon": "./assets/images/icon.png"
     },
@@ -23,6 +29,11 @@
         }
       ]
     ],
+    "extra": {
+      "eas": {
+        "projectId": "00000000-0000-0000-0000-000000000000"
+      }
+    },
     "experiments": {}
   }
 }

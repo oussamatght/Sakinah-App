@@ -102,16 +102,20 @@ export async function fetchHadithCategoryChildren(
 // List
 // ---------------------------------------------------------------------------
 
-function normalizeListItem(raw: JsonRecord): HadithItem {
+function normalizeListItem(
+  raw: JsonRecord,
+  categoryTitle?: string,
+): HadithItem {
   const text =
     stringProp(raw.hadeeth) ?? stringProp(raw.explanation) ?? stringProp(raw.title) ?? "";
   return {
     id: String(raw.id ?? ""),
-    title: String(raw.title ?? ""),
     text,
-    source: SOURCE_NAME,
+    book: categoryTitle ?? "موسوعة الأحاديث",
+    reference: String(raw.id ?? ""),
     ...(stringProp(raw.attribution) ? { attribution: stringProp(raw.attribution)! } : {}),
     ...(stringProp(raw.grade) ? { grade: stringProp(raw.grade)! } : {}),
+    apiSource: SOURCE_NAME,
   };
 }
 
@@ -127,9 +131,15 @@ export async function fetchHadithList(
     "الأحاديث",
   );
   const data = Array.isArray(payload.data) ? payload.data : [];
+  // "book" for thematic hadiths = the category's own title (the highest known
+  // title for this listing) — the old hadithService.ts used the same fallback.
+  const categoryTitle =
+    (await fetchHadithCategories())
+      .flatMap((root) => [root, ...root.children])
+      .find((node) => node.id === categoryId)?.titleAr ?? "موسوعة الأحاديث";
   const items = data
     .filter(isJsonRecord)
-    .map(normalizeListItem)
+    .map((raw) => normalizeListItem(raw, categoryTitle))
     .filter((item) => item.id);
 
   const meta = isJsonRecord(payload.meta) ? payload.meta : null;
@@ -153,13 +163,10 @@ export async function fetchHadithList(
   };
 }
 
-// ---------------------------------------------------------------------------
-// Detail
-// ---------------------------------------------------------------------------
-
+/** Full tahrīj string from the source, else the first category title. */
 function normalizeReference(raw: HadithOneRaw): string | undefined {
   if (typeof raw.reference === "string" && raw.reference.trim()) {
-    return raw.reference.trim();
+    return raw.reference.trim().split(/\n+/)[0]?.trim() || raw.reference.trim();
   }
   if (raw.categories !== undefined) {
     const first = Array.isArray(raw.categories) ? raw.categories[0] : undefined;
@@ -184,15 +191,15 @@ export async function fetchHadithDetail(hadithId: string): Promise<HadithItem> {
   }
   const text =
     stringProp(payload.hadeeth) ?? stringProp(payload.explanation) ?? "";
-  const reference = normalizeReference(payload);
+  const reference = normalizeReference(payload) ?? String(payload.id ?? "");
   return {
     id: String(payload.id ?? ""),
-    title,
     text,
-    source: SOURCE_NAME,
+    book: title ? title.slice(0, 60) : "موسوعة الأحاديث",
+    reference,
     ...(stringProp(payload.attribution) ? { attribution: stringProp(payload.attribution)! } : {}),
     ...(stringProp(payload.grade) ? { grade: stringProp(payload.grade)! } : {}),
-    ...(reference ? { reference } : {}),
+    apiSource: SOURCE_NAME,
   };
 }
 
@@ -215,7 +222,7 @@ export async function searchHadiths(
   const data = Array.isArray(payload.data) ? payload.data : [];
   const items = data
     .filter(isJsonRecord)
-    .map(normalizeListItem)
+    .map((raw) => normalizeListItem(raw))
     .filter((item) => item.id);
   const meta = isJsonRecord(payload.meta) ? payload.meta : null;
   const currentPage = meta ? intString(meta.current_page) : undefined;
@@ -277,9 +284,9 @@ function mapHadisApiItem(raw: JsonRecord, bookName: string): HadithItem {
   const number = intString(raw.number, 0) ?? 0;
   return {
     id: `${bookName}:${number}`,
-    title: `${bookName} — حديث ${number}`,
     text: String(raw.arab ?? ""),
-    source: bookName,
+    book: bookName,
+    reference: String(number),
   };
 }
 

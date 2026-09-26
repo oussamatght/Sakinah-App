@@ -17,6 +17,7 @@ import {
   Screen,
 } from "@/components/ui";
 import { FavoriteButton } from "@/components/FavoriteButton";
+import { GradeBadge } from "@/components/GradeBadge";
 import { radii, spacing, typography } from "@/constants/tokens";
 import { useColors } from "@/hooks/useColors";
 
@@ -302,7 +303,7 @@ export default function HadithBrowser() {
                     refId: item.id,
                     title: headerTitle,
                     text: item.text.slice(0, 220),
-                    subtitle: item.source,
+                    subtitle: item.book,
                   }}
                 />
               </View>
@@ -316,20 +317,11 @@ export default function HadithBrowser() {
                     الراوي: {item.attribution}
                   </Text>
                 ) : null}
-                {item.grade ? (
-                  <Text
-                    style={[
-                      styles.hadithMetaText,
-                      { color: colors.mutedForeground },
-                    ]}>
-                    الدرجة: {item.grade}
-                  </Text>
-                ) : null}
-              </View>
-              <View style={styles.hadithFooter}>
+                <GradeBadge grade={item.grade} />
+              </View>              <View style={styles.hadithFooter}>
                 <Feather name="bookmark" size={14} color={colors.primary} />
-                <Text style={[styles.hadithSource, { color: colors.primary }]}>
-                  {item.source}
+                <Text style={[styles.hadithSource, { color: colors.primary }]} numberOfLines={1}>
+                  {item.book} — رقم {item.reference}
                 </Text>
               </View>
             </View>

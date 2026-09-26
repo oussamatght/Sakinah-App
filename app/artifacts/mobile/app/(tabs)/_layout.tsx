@@ -12,6 +12,10 @@ import { SymbolView } from 'expo-symbols';
 // NativeTabs intentionally does NOT use custom design tokens — liquid glass
 // is a system-level appearance provided by iOS and cannot be overridden.
 // Custom brand colors are applied only on the ClassicTabLayout path (older iOS / Android / web).
+//
+// Tab set (Option أ): home / quran / prayer / tasbih / hadith.
+// "المزيد" is gone from the bar — favorites & settings moved to the home
+// header; the "حديث اليوم" card lives in the hadith tab header area instead.
 function NativeTabLayout() {
   return (
     <NativeTabs>
@@ -27,13 +31,19 @@ function NativeTabLayout() {
         />
         <NativeTabs.Trigger.Label>القرآن</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="prayer">
+        <NativeTabs.Trigger.Icon
+          sf={{ default: 'clock', selected: 'clock.fill' }}
+        />
+        <NativeTabs.Trigger.Label>الصلاة</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
       <NativeTabs.Trigger name="tasbih">
         <NativeTabs.Trigger.Icon sf={{ default: 'circle.circle', selected: 'circle.circle.fill' }} />
         <NativeTabs.Trigger.Label>التسبيح</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="more">
-        <NativeTabs.Trigger.Icon sf={{ default: 'ellipsis', selected: 'ellipsis.circle.fill' }} />
-        <NativeTabs.Trigger.Label>المزيد</NativeTabs.Trigger.Label>
+      <NativeTabs.Trigger name="hadith">
+        <NativeTabs.Trigger.Icon sf={{ default: 'text.quote', selected: 'text.quote' }} />
+        <NativeTabs.Trigger.Label>الأحاديث</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
@@ -102,6 +112,18 @@ function ClassicTabLayout() {
         }}
       />
       <Tabs.Screen
+        name="prayer"
+        options={{
+          title: 'الصلاة',
+          tabBarIcon: ({ color }) =>
+            isIOS ? (
+              <SymbolView name="clock" tintColor={color} size={22} />
+            ) : (
+              <Feather name="clock" size={21} color={color} />
+            ),
+        }}
+      />
+      <Tabs.Screen
         name="tasbih"
         options={{
           title: 'التسبيح',
@@ -114,14 +136,14 @@ function ClassicTabLayout() {
         }}
       />
       <Tabs.Screen
-        name="more"
+        name="hadith"
         options={{
-          title: 'المزيد',
+          title: 'الأحاديث',
           tabBarIcon: ({ color }) =>
             isIOS ? (
-              <SymbolView name="ellipsis.circle" tintColor={color} size={22} />
+              <SymbolView name="text.quote" tintColor={color} size={22} />
             ) : (
-              <Feather name="more-horizontal" size={22} color={color} />
+              <Feather name="message-circle" size={21} color={color} />
             ),
         }}
       />

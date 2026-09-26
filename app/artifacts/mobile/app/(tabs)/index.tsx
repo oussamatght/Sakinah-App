@@ -13,10 +13,23 @@ import {
 } from '@/components/ui';
 import { spacing, typography } from '@/constants/tokens';
 import { useColors } from '@/hooks/useColors';
+import { useResumeReading } from '@/hooks/useResumeReading';
 
 export default function HomeScreen() {
   const colors = useColors();
   const router = useRouter();
+  // "أكمل وردك" — آخر موضع محفوظ، أو الفاتحة عند أول استخدام (بلا فتح فاشل)
+  const resume = useResumeReading();
+  const openResume = () => {
+    const target = resume ?? { surahId: 1, surahName: 'الفاتحة', ayahNumber: 1 };
+    router.push({
+      pathname: '/quran-reader',
+      params: {
+        surahId: String(target.surahId),
+        ...(target.surahName ? { surah: target.surahName } : {}),
+      },
+    });
+  };
   return (
     <Screen>
       <View style={styles.header}>
@@ -25,7 +38,10 @@ export default function HomeScreen() {
           <Text style={[styles.title, { color: colors.foreground }]}>يوم مبارك</Text>
           <Text style={[styles.date, { color: colors.primary }]}>رفيقك اليومي للقرآن والذكر</Text>
         </View>
-        <IconButton icon="search" label="البحث" onPress={() => router.push('/quran')} variant="soft" />
+        <View style={styles.headerActions}>
+          <IconButton icon="heart" label="المفضلة" onPress={() => router.push('/favorites')} variant="soft" />
+          <IconButton icon="sliders" label="الإعدادات" onPress={() => router.push('/settings')} variant="soft" />
+        </View>
       </View>
 
       <PrayerCard onPress={() => router.push('/prayer')} />
@@ -37,14 +53,14 @@ export default function HomeScreen() {
         contentContainerStyle={styles.quickActions}
       >
         <QuickAction icon="compass" label="القبلة" onPress={() => router.push('/qibla')} />
-        <QuickAction icon="heart" label="المفضلة" onPress={() => router.push('/favorites')} />
-        <QuickAction icon="message-circle" label="الأحاديث" onPress={() => router.push('/(tabs)/more')} />
-        <QuickAction icon="target" label="التسبيح" onPress={() => router.push('/(tabs)/tasbih')} />
-        <QuickAction icon="book-open" label="القرآن" onPress={() => router.push('/(tabs)/quran')} />
+        <QuickAction icon="clock" label="مواقيت الصلاة" onPress={() => router.push('/(tabs)/prayer')} />
+        <QuickAction icon="message-circle" label="الأحاديث" onPress={() => router.push('/(tabs)/hadith')} />
+        <QuickAction icon="download" label="تحميل القرآن" onPress={() => router.push('/quran-download')} />
+        <QuickAction icon="book-open" label="المصحف" onPress={() => router.push('/(tabs)/quran')} />
       </ScrollView>
 
-      <SectionTitle title="أكمل وردك" action="فتح المصحف" onAction={() => router.push('/quran-reader')} />
-      <ReadingCard onPress={() => router.push('/quran-reader')} />
+      <SectionTitle title="أكمل وردك" action="فتح المصحف" onAction={openResume} />
+      <ReadingCard onPress={openResume} />
 
       <SectionTitle title="من وحي اليوم" />
       <DailyVerse />
@@ -64,6 +80,7 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   header: { alignItems: 'flex-start', flexDirection: 'row-reverse', justifyContent: 'space-between', marginBottom: spacing.lg },
+  headerActions: { flexDirection: 'row-reverse', gap: 8 },
   headerCopy: { alignItems: 'flex-end', flex: 1 },
   greeting: { fontSize: typography.body, fontWeight: '500' },
   title: { fontSize: typography.display, fontWeight: '700', marginTop: 2 },

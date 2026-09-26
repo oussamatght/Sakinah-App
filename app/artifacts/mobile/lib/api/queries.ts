@@ -37,6 +37,8 @@ import {
   isQuranDownloaded,
   storeLocalTafsir,
 } from "../offline/quranDb";
+import { storeHadiths } from "../offline/hadithDb";
+import { getPrayerTimesCache, savePrayerTimesCache } from "../storage/prayerCache";
 import type {
   HadithBook,
   HadithCategoryNode,
@@ -188,7 +190,34 @@ export function useGetPrayerTimes(
   const enabled = options?.query?.enabled ?? true;
   return useQuery({
     queryKey: prayerKeys.times(latitude, longitude, date),
-    queryFn: () => fetchPrayerTimes(latitude, longitude, date),
+    // Offline fallback (Task 8): on network failure, return the last cached
+    // result (marked cached: true) instead of an error. On success, cache it.
+    queryFn: async () => {
+      try {
+        const fresh = await fetchPrayerTimes(latitude, longitude, date);
+        await savePrayerTimesCache({
+          timings: fresh.timings,
+          hijriDate: fresh.hijriDate,
+          date: fresh.date,
+          location: fresh.location,
+          cachedAt: new Date().toISOString(),
+        });
+        return fresh;
+      } catch (error) {
+        const cached = await getPrayerTimesCache();
+        if (cached) {
+          return {
+            date: cached.date,
+            hijriDate: cached.hijriDate,
+            timezone: "—",
+            location: cached.location,
+            timings: cached.timings,
+            cached: true,
+          } as PrayerTimesResult & { cached: boolean };
+        }
+        throw error;
+      }
+    },
     enabled,
     staleTime: HOUR,
     gcTime: DAY,
@@ -229,7 +258,13 @@ export function useGetBookHadiths(
   const perPage = params?.perPage ?? 10;
   return useQuery({
     queryKey: ["hadith", "book", bookSlug, page, perPage],
-    queryFn: () => fetchBookHadiths(bookSlug, page, perPage),
+    // Accumulative offline cache: every fetched page is stored to SQLite so
+    // previously-browsed hadiths stay readable offline (Task 7).
+    queryFn: async () => {
+      const result = await fetchBookHadiths(bookSlug, page, perPage);
+      storeHadiths(result.items);
+      return result;
+    },
     enabled: Boolean(params?.bookSlug),
     staleTime: HOUR,
     gcTime: DAY,
