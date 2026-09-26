@@ -1,135 +1,161 @@
-# 🌙 سكينة (Sakinah)
+# 🌙 Sakinah (سكينة)
 
 <p align="center">
-  <strong>رفيقك اليومي للقرآن والذكر ومواقيت الصلاة</strong>
+  <strong>Your daily companion for Quran, remembrance, and prayer times</strong>
 </p>
 
 <p align="center">
-  تطبيق إسلامي شامل، عربي بالكامل، مبني ليكون <strong>صدقة جارية</strong> — مجاني، مفتوح، وبلا أي غاية تجارية.
+  A complete, Arabic-first Islamic mobile app — free, open, and built with no commercial intent whatsoever.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/React_Native-20232A?style=for-the-badge&logo=react&logoColor=61DAFB" alt="React Native" />
+  <img src="https://img.shields.io/badge/Expo-000020?style=for-the-badge&logo=expo&logoColor=white" alt="Expo" />
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white" alt="SQLite" />
+  <img src="https://img.shields.io/badge/React_Query-FF4154?style=for-the-badge&logo=reactquery&logoColor=white" alt="React Query" />
 </p>
 
 ---
 
-## 📖 عن التطبيق
+## 📖 About
 
-**سكينة** تطبيق جوّال إسلامي يجمع بين القرآن الكريم، الأحاديث النبوية، الأذكار والتسبيح، ومواقيت الصلاة، في تجربة واحدة بسيطة وهادئة، مصممة بالكامل باللغة العربية واتجاه الكتابة من اليمين إلى اليسار (RTL).
+**Sakinah** is an Islamic mobile app that brings together the Holy Quran, Prophetic hadiths, adhkar and tasbih, and accurate prayer times, in one calm, simple experience — fully in Arabic, right-to-left (RTL) from the ground up.
 
-الهدف من هذا المشروع أن يكون **صدقة جارية**: عمل يُقصد به وجه الله، ينتفع به المسلمون في قراءة القرآن، وحفظ الأذكار، ومعرفة مواقيت الصلاة، دون مقابل ودون إعلانات ودون جمع بيانات.
+This project is built as an act of **Sadaqah Jariyah** (ongoing charity): work intended purely for the sake of Allah, meant to benefit Muslims in reading the Quran, keeping up with remembrance, and knowing their prayer times — free of charge, free of ads, and free of any data collection.
 
-> *"إذا مات ابن آدم انقطع عمله إلا من ثلاث: صدقة جارية، أو علم يُنتفع به، أو ولد صالح يدعو له"*
-
----
-
-## ✨ المزايا الرئيسية
-
-### 📗 القرآن الكريم
-- النص الكامل للمصحف الشريف، جميع السور الـ 114
-- التنقل بالسور أو بالأجزاء الثلاثين
-- تفسير الآيات (تفسير ميسر) بالضغط على أي آية
-- الاستماع للتلاوة الصوتية (الشيخ مشاري العفاسي، مع إمكانية اختيار قارئ آخر)
-- إمكانية تكبير أو تصغير حجم الخط لراحة العين
-- **حفظ الآيات في المفضلة** بضغطة واحدة
-- **متابعة القراءة تلقائيًا** — يحفظ التطبيق آخر آية توقفت عندها ويعرض زر "أكمل وردك" في الصفحة الرئيسية
-- **القراءة بلا إنترنت** — يمكن تنزيل المصحف كاملاً (نحو 2 ميغابايت) للقراءة في أي مكان وبلا حاجة للاتصال بالشبكة
-
-### 🕌 مواقيت الصلاة
-- حساب دقيق لمواقيت الصلوات الخمس حسب الموقع الجغرافي
-- التاريخ الهجري إلى جانب الميلادي
-- تنبيه بالوقت المتبقي حتى الصلاة القادمة
-- **إشعار أذان حقيقي** عند دخول كل وقت صلاة، بصوت أذان فعلي وليس تنبيهًا صامتًا
-- **حفظ آخر مواقيت معروفة** والعمل بها عند انقطاع الإنترنت، مع تنبيه واضح بذلك
-
-### 🧭 اتجاه القبلة
-- بوصلة حيّة تعتمد على موقع الجهاز ومستشعر الاتجاه المغناطيسي
-- تحديث مباشر وسلس لاتجاه القبلة أينما كنت
-
-### 📿 التسبيح
-- عداد تسبيح بسيط: كل ضغطة تزيد العدد بواحد
-- إمكانية كتابة اسم الذكر الذي تريد تكراره بنفسك
-- حفظ العداد وسجل التسبيحات محليًا على جهازك
-- اهتزاز خفيف مصاحب لكل ضغطة
-
-### 🗣️ الأحاديث النبوية
-- تصفح الأحاديث عبر الكتب التسعة المعتمدة (صحيح البخاري، صحيح مسلم، سنن أبي داود، الترمذي، النسائي، ابن ماجه، مسند أحمد، موطأ مالك، سنن الدارمي)
-- تصنيف موضوعي حسب الأبواب (العقيدة، الفقه، السيرة، الأخلاق، وغيرها)
-- **شارة ملوّنة توضح درجة كل حديث**: أخضر للصحيح، أصفر للحسن، أحمر للضعيف
-- إمكانية حفظ أي حديث في المفضلة
-- تخزين تراكمي للأحاديث التي تصفحتها سابقًا، لتبقى متاحة للقراءة بلا إنترنت
-
-### ⭐ المفضلة
-- مكان واحد يجمع كل ما حفظته: آيات وأحاديث
-- وصول سريع لمراجعة ما أعجبك أو تريد حفظه للرجوع إليه
-
-### 🎯 الورد اليومي
-- تحديد هدف يومي للقراءة (عدد صفحات أو أجزاء)
-- متابعة تلقائية لتقدمك اليومي
-- تشجيع على الاستمرارية عبر تتبع الإنجاز
-
-### ⚙️ الإعدادات
-- التحكم بالمظهر (فاتح، داكن، أو تلقائي حسب النظام)
-- اختيار حجم خط المصحف
-- اختيار القارئ الافتراضي من بين عدة قراء
-- تفعيل أو إيقاف تنبيهات الصلاة والأذان
-- بياناتك محفوظة على جهازك فقط، ولا تُرسل لأي خادم خارجي
+> *"When a person dies, their deeds come to an end except for three: ongoing charity, beneficial knowledge, or a righteous child who prays for them."*
 
 ---
 
-## 🌐 العمل بلا إنترنت (Offline)
+## ✨ Key Features
 
-من أهم ما يميز سكينة أنه لا يتوقف عن العمل عند انقطاع الشبكة:
+### 📗 Holy Quran
+- Complete Mushaf text — all 114 surahs
+- Browse by surah or by juz (the 30 parts)
+- Tafsir (interpretation) available on tap for any verse
+- Audio recitation (Mishary Alafasy by default, with reciter selection)
+- Adjustable Quran text size for comfortable reading
+- **Bookmark any verse to favorites** with one tap
+- **Automatic reading position** — the app remembers where you left off and shows a "Continue Reading" card on the home screen
+- **Fully offline reading** — download the entire Mushaf (~2 MB) once and read anywhere without an internet connection
 
-| المحتوى | السلوك بلا إنترنت |
+### 🕌 Prayer Times
+- Accurate calculation of the five daily prayers based on your location
+- Hijri date shown alongside the Gregorian date
+- Countdown to the next prayer
+- **Real adhan notification** — a genuine call-to-prayer sound plays when each prayer time begins, not a silent system alert
+- **Offline fallback** — the last known prayer times are cached and shown with a clear notice when there's no connection
+
+### 🧭 Qibla Direction
+- Live compass based on device location and magnetic heading sensor
+- Smooth, real-time direction update wherever you are
+
+### 📿 Tasbih (Dhikr Counter)
+- Simple tap-to-count dhikr counter
+- Type in any dhikr phrase you want to repeat
+- Counter and history saved locally on your device
+- Light haptic feedback on every tap
+
+### 🗣️ Hadith Collection
+- Browse the nine canonical hadith books (Sahih al-Bukhari, Sahih Muslim, Sunan Abi Dawud, Tirmidhi, Nasa'i, Ibn Majah, Musnad Ahmad, Muwatta Malik, Sunan al-Darimi)
+- Thematic categories (aqeedah, fiqh, seerah, manners, and more)
+- **Color-coded grade badge** for every hadith: green for Sahih, yellow for Hasan, red for Da'if
+- Save any hadith to favorites
+- Previously browsed hadiths are cached for offline reading
+
+### ⭐ Favorites
+- One place to collect everything you've saved: verses and hadiths
+- Quick access to revisit what matters to you
+
+### 🎯 Daily Wird (Reading Goal)
+- Set a daily reading target (pages or juz)
+- Automatic progress tracking
+- Encourages consistency by keeping your streak in view
+
+### ⚙️ Settings
+- Theme control (light, dark, or automatic)
+- Adjustable Quran text size
+- Default reciter selection
+- Toggle prayer time and adhan notifications
+- All data stays on your device — nothing is sent to any external server
+
+---
+
+## 🌐 Offline-First
+
+Sakinah keeps working even when your connection doesn't:
+
+| Content | Offline behavior |
 |---|---|
-| القرآن الكريم | متاح بالكامل بعد التنزيل الأولي (مرة واحدة) |
-| الأحاديث | كل ما تصفحته سابقًا + كل المفضلة محفوظ ومتاح |
-| مواقيت الصلاة | تُعرض آخر مواقيت معروفة مع تنبيه بذلك |
-| الأذكار والتسبيح | تعمل بالكامل دون الحاجة لأي اتصال أصلًا |
+| Holy Quran | Fully available after a one-time download |
+| Hadiths | Everything previously browsed + all favorites remain accessible |
+| Prayer Times | Last known times are shown with a clear offline notice |
+| Adhkar & Tasbih | Work fully with no connection required at all |
 
 ---
 
-## 🛠️ التقنيات المستخدمة
+## 🛠️ Tech Stack
 
-| الطبقة | التقنية |
+<p align="left">
+  <img src="https://img.shields.io/badge/React_Native-20232A?style=flat-square&logo=react&logoColor=61DAFB" alt="React Native" />
+  <img src="https://img.shields.io/badge/Expo-000020?style=flat-square&logo=expo&logoColor=white" alt="Expo" />
+  <img src="https://img.shields.io/badge/Expo_Router-000020?style=flat-square&logo=expo&logoColor=white" alt="Expo Router" />
+  <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
+</p>
+<p align="left">
+  <img src="https://img.shields.io/badge/SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite" />
+  <img src="https://img.shields.io/badge/AsyncStorage-6E4C13?style=flat-square&logo=react&logoColor=white" alt="AsyncStorage" />
+  <img src="https://img.shields.io/badge/TanStack_Query-FF4154?style=flat-square&logo=reactquery&logoColor=white" alt="React Query" />
+</p>
+<p align="left">
+  <img src="https://img.shields.io/badge/Expo_Notifications-000020?style=flat-square&logo=expo&logoColor=white" alt="Expo Notifications" />
+  <img src="https://img.shields.io/badge/Expo_Location-000020?style=flat-square&logo=expo&logoColor=white" alt="Expo Location" />
+  <img src="https://img.shields.io/badge/EAS_Build-000020?style=flat-square&logo=expo&logoColor=white" alt="EAS Build" />
+</p>
+
+| Layer | Technology |
 |---|---|
-| تطبيق الجوال | Expo (React Native) + expo-router |
-| التخزين المحلي | SQLite + AsyncStorage |
-| اللغة | TypeScript |
-| إدارة البيانات | React Query (TanStack Query) |
-| الإشعارات | expo-notifications |
-| الموقع والبوصلة | expo-location + expo-sensors |
+| Mobile app | Expo (React Native) + expo-router |
+| Language | TypeScript |
+| Local storage | SQLite + AsyncStorage |
+| Data fetching / caching | TanStack Query (React Query) |
+| Notifications | expo-notifications |
+| Location & compass | expo-location + expo-sensors |
+| Build & distribution | EAS Build |
 
 ---
 
-## 📚 مصادر المحتوى
+## 📚 Content Sources
 
-يعتمد التطبيق على مصادر إسلامية موثوقة ومفتوحة لجلب المحتوى:
+The app relies on trusted, open Islamic content sources:
 
-- **نص القرآن وتفسيره**: alquran.cloud
-- **التلاوات الصوتية**: quran.com
-- **الأحاديث النبوية**: hadeethenc.com وقواعد بيانات الكتب التسعة المعتمدة
-- **مواقيت الصلاة**: aladhan.com (طريقة الحساب: رابطة العالم الإسلامي)
+- **Quran text & tafsir**: alquran.cloud
+- **Audio recitation**: quran.com
+- **Hadith collections**: hadeethenc.com and the canonical nine-book databases
+- **Prayer times**: aladhan.com (calculation method: Muslim World League)
 
-جميع هذه المصادر عامة ومفتوحة، ولا يقوم التطبيق بجمع أو مشاركة أي بيانات شخصية للمستخدم مع أي جهة.
+All sources are public and open. The app does not collect or share any personal user data with any party.
 
 ---
 
-## 🚀 تشغيل المشروع محليًا
+## 🚀 Running Locally
 
 ```bash
-# 1) تثبيت الاعتماديات
+# 1) Install dependencies
 cd app/artifacts/mobile
 npm install
 
-# 2) تشغيل خادم التطوير
+# 2) Start the dev server
 npx expo start
 
-# 3) فتح التطبيق
-# امسح رمز QR بتطبيق Expo Go، أو شغّله في محاكي أندرويد/iOS
+# 3) Open the app
+# Scan the QR code with Expo Go, or run it on an Android/iOS emulator
 ```
 
-> ملاحظة: بعض المزايا (مثل إشعارات الأذان الحقيقية بصوت مخصص) تحتاج نسخة تطوير كاملة (development build) عبر EAS، ولا تعمل بشكل كامل داخل تطبيق Expo Go العادي.
+> Note: some features (like real adhan sound notifications) require a full development build via EAS and won't work completely inside the standard Expo Go app.
 
-### بناء نسخة قابلة للتثبيت (APK / Development Build)
+### Building an installable version (APK / Development Build)
 
 ```bash
 npm install -g eas-cli
@@ -139,33 +165,33 @@ eas build --profile development --platform android
 
 ---
 
-## 🔒 الخصوصية
+## 🔒 Privacy
 
-- لا يوجد تسجيل دخول أو حسابات مستخدمين
-- كل بياناتك (المفضلة، الورد، الإعدادات) محفوظة محليًا على جهازك فقط
-- لا يتم جمع أو بيع أو مشاركة أي بيانات شخصية مع أي طرف ثالث
-- الموقع الجغرافي يُستخدم فقط لحساب مواقيت الصلاة واتجاه القبلة، ولا يُخزَّن أو يُرسل لأي خادم
-
----
-
-## 🤲 نية المشروع
-
-هذا المشروع مُقدَّم مجانًا وبلا مقابل، سائلين الله أن ينفع به قارئه ومستمعه، وأن يجعله في ميزان حسنات كل من ساهم فيه أو نشره أو دلّ عليه أو علّم أحدًا استخدامه.
-
-كل من ساهم بفكرة، أو كود، أو دعاء، أو مجرد نشر التطبيق لمن ينتفع به — فله أجره بإذن الله.
-
-> *"من دلّ على خير فله مثل أجر فاعله"*
-
-نسأل الله أن يتقبل هذا العمل خالصًا لوجهه الكريم، وأن ينفع به كل من قرأ فيه آية، أو حفظ ذكرًا، أو أقام صلاة في وقتها.
+- No sign-up or user accounts
+- All your data (favorites, wird progress, settings) is stored locally on your device only
+- No personal data is collected, sold, or shared with any third party
+- Location is used only to calculate prayer times and Qibla direction — it is never stored or transmitted to any server
 
 ---
 
-## 📄 الرخصة
+## 🤲 Project Intention
 
-هذا المشروع مفتوح المصدر ومتاح للجميع للاستخدام والتطوير والنشر، على أن يبقى الانتفاع به مجانيًا للمستخدم النهائي.
+This project is offered for free and without expectation of return, in the hope that it benefits everyone who reads from it or listens to it, and that Allah places it in the scale of good deeds for everyone who contributed to it, shared it, or pointed someone toward it.
+
+Anyone who contributed an idea, code, a prayer, or simply shared this app with someone who could benefit from it — may their reward be with Allah.
+
+> *"Whoever guides someone to goodness will have a reward like the one who did it."*
+
+We ask Allah to accept this work purely for His sake, and to benefit through it everyone who reads a verse, keeps a remembrance, or establishes a prayer on time.
+
+---
+
+## 📄 License
+
+This project is open source and available for everyone to use, modify, and distribute, on the condition that it remains free for the end user.
 
 ---
 
 <p align="center">
-  اللهم اجعله علمًا ينتفع به، وصدقة جارية بعد انقطاع العمل 🤲
+  May Allah make this a source of lasting benefit, and an ongoing charity after all other deeds have ceased 🤲
 </p>
