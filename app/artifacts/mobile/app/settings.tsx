@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { Platform, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import * as Notifications from 'expo-notifications';
 import { Screen, IconButton, SectionTitle, ErrorState } from '@/components/ui';
 import { radii, spacing, typography } from '@/constants/tokens';
 import { useColors } from '@/hooks/useColors';
@@ -11,9 +10,21 @@ import { setThemePreference } from '@/hooks/useTheme';
 import { FONT_SCALES, RECITERS, getPrayerTimesCache, type ThemePreference } from '@/lib/storage';
 import {
   cancelAdhanNotifications,
+  isExpoGo,
   playAdhanTestNotification,
   scheduleAdhanNotifications,
 } from '@/lib/notifications/adhan';
+
+// ⚠️ لا استيراد ساكن لexpo-notifications هنا — يرمي خطأ داخل Expo Go (SDK 53+)
+// ويسقط الملف كله (سبب تحذير "missing the required default export").
+// التحميل الكسول داخل try/catch فقط:
+function getNotifications(): typeof import('expo-notifications') | null {
+  try {
+    return require('expo-notifications');
+  } catch {
+    return null;
+  }
+}
 
 const THEME_OPTIONS: Array<{ key: ThemePreference; label: string }> = [
   { key: 'light', label: 'فاتح' },
@@ -38,33 +49,46 @@ export default function SettingsScreen() {
   // reschedule (or cancel) the adhan notifications to match the switch.
   useEffect(() => {
     if (!ready || Platform.OS === 'web') return;
-    void (async () => {
+    // Expo Go: الإشعارات غير مدعومة إطلاقًا — نعرض تنبيهًا ونخرج دون أي نداء.
+    if (isExpoGo()) {
       if (settings.prayerNotifications) {
-        const existing = await Notifications.getPermissionsAsync();
-        if (!existing.granted && existing.canAskAgain) {
-          const result = await Notifications.requestPermissionsAsync();
-          if (!result.granted) {
-            setNotifError('لم يُمنح إذن الإشعارات — فعّله من إعدادات الجهاز.');
-            await save({ prayerNotifications: false });
-            return;
+        setNotifError('الإشعارات غير مدعومة في Expo Go — استعمل development build.');
+      }
+      return;
+    }
+    const Notifications = getNotifications();
+    if (!Notifications) return;
+    void (async () => {
+      try {
+        if (settings.prayerNotifications) {
+          const existing = await Notifications.getPermissionsAsync();
+          if (!existing.granted && existing.canAskAgain) {
+            const result = await Notifications.requestPermissionsAsync();
+            if (!result.granted) {
+              setNotifError('لم يُمنح إذن الإشعارات — فعّله من إعدادات الجهاز.');
+              await save({ prayerNotifications: false });
+              return;
+            }
           }
+          // جدولة يومية: مواقيت اليوم من آخر كاش محفوظ (إن وجد) — والجدولة
+          // تعاد عند كل فتح للتطبيق لأن المواقيت تتغير يوميًا.
+          const cached = await getPrayerTimesCache();
+          if (cached) {
+            const result = await scheduleAdhanNotifications({
+              date: cached.date,
+              hijriDate: cached.hijriDate,
+              timezone: '—',
+              location: cached.location,
+              timings: cached.timings,
+            });
+            if (result.scheduled === 0 && result.reason) setNotifError(result.reason);
+            else setNotifError(null);
+          }
+        } else {
+          await cancelAdhanNotifications();
         }
-        // جدولة يومية: مواقيت اليوم من آخر كاش محفوظ (إن وجد) — والجدولة
-        // تعاد عند كل فتح للتطبيق لأن المواقيت تتغير يوميًا.
-        const cached = await getPrayerTimesCache();
-        if (cached) {
-          const result = await scheduleAdhanNotifications({
-            date: cached.date,
-            hijriDate: cached.hijriDate,
-            timezone: '—',
-            location: cached.location,
-            timings: cached.timings,
-          });
-          if (result.scheduled === 0 && result.reason) setNotifError(result.reason);
-          else setNotifError(null);
-        }
-      } else {
-        await cancelAdhanNotifications();
+      } catch {
+        // أي فشل إشعارات لا يعطل شاشة الإعدادات.
       }
     })();
   }, [ready, settings.prayerNotifications, save]);

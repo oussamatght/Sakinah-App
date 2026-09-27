@@ -26,6 +26,7 @@ import {
   fetchBookHadiths,
   fetchHadithBooks,
   fetchHadithCategories,
+  fetchHadithDetail,
   fetchHadithList,
 } from "./hadith";
 import { fetchPrayerTimes } from "./prayer";
@@ -42,6 +43,7 @@ import { getPrayerTimesCache, savePrayerTimesCache } from "../storage/prayerCach
 import type {
   HadithBook,
   HadithCategoryNode,
+  HadithItem,
   HadithPage,
   QuranAudio,
   QuranChapter,
@@ -228,11 +230,18 @@ export function useGetPrayerTimes(
 // Hadith
 // ---------------------------------------------------------------------------
 
+// Phase 11: canonical query-key family for hadith:
+//   ["hadith", "categories"]
+//   ["hadith", "category", categoryId, page, perPage]
+//   ["hadith", "detail", hadithId]
+//   ["hadith", "search", phrase]
+//   ["hadith", "book", bookSlug, page, perPage]
+// Categories are quasi-static → ETERNITY staleTime (no refetch per screen).
 export function useGetHadithCategories(): UseQueryResult<HadithCategoryNode[], Error> {
   return useQuery({
     queryKey: ["hadith", "categories"],
     queryFn: fetchHadithCategories,
-    staleTime: DAY,
+    staleTime: ETERNITY,
     gcTime: 2 * DAY,
   });
 }
@@ -293,11 +302,31 @@ export function useGetHadiths(
   const perPage = params?.perPage ?? 5;
   const enabled = options?.query?.enabled ?? true;
   return useQuery({
-    queryKey: ["hadith", "list", categoryId, page, perPage],
+    // Phase 11: ["hadith", "category", …] per the canonical key family.
+    queryKey: ["hadith", "category", categoryId, page, perPage],
     queryFn: () => fetchHadithList(categoryId, page, perPage),
     enabled,
     staleTime: HOUR,
     gcTime: DAY,
+  });
+}
+
+/**
+ * تفصيل حديث واحد — المسار الوحيد الذي تظهر فيه الدرجة كما أعطاها المصدر.
+ * HadeethEnc /hadeeths/one هو المصدر الوحيد الذي يقدم grade/attribution/
+ * explanation/reference في التفصيل (مُتحقق حيًا: القوائم والبحث بلا grade).
+ * hadis-api-id (الكتب التسعة) لا يوفر endpoint تفصيل أصلًا — تمرر الشاشة
+ * hadithId=null فيتعطل الاستعلام (enabled=false) بدل خطأ اتصال مضلل.
+ */
+export function useGetHadithDetail(
+  hadithId: string | null,
+): UseQueryResult<HadithItem, Error> {
+  return useQuery({
+    queryKey: ["hadith", "detail", hadithId ?? ""],
+    queryFn: () => fetchHadithDetail(hadithId!),
+    enabled: Boolean(hadithId),
+    staleTime: DAY,
+    gcTime: 7 * DAY,
   });
 }
 

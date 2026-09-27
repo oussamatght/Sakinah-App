@@ -288,7 +288,20 @@ export default function HadithBrowser() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.hadithList}
           renderItem={({ item }) => (
-            <View
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="فتح تفصيل الحديث"
+              // HadeethEnc فقط: تفصيله هو المصدر الوحيد للدرجة الحرفية —
+              // بطاقات hadis-api-id (الكتب) لا تفتح تفصيلًا غير موجود.
+              onPress={
+                item.apiSource === "hadeethenc.com"
+                  ? () =>
+                    router.push(
+                      `/hadith-detail?hadithId=${encodeURIComponent(item.id)}`,
+                    )
+                  : undefined
+              }
+              disabled={item.apiSource !== "hadeethenc.com"}
               style={[
                 styles.hadithCard,
                 { backgroundColor: colors.card, borderColor: colors.border },
@@ -317,14 +330,16 @@ export default function HadithBrowser() {
                     الراوي: {item.attribution}
                   </Text>
                 ) : null}
-                <GradeBadge grade={item.grade} />
-              </View>              <View style={styles.hadithFooter}>
+                <GradeBadge grade={item.grade} showMissing />
+              </View>
+              <View style={styles.hadithFooter}>
                 <Feather name="bookmark" size={14} color={colors.primary} />
                 <Text style={[styles.hadithSource, { color: colors.primary }]} numberOfLines={1}>
-                  {item.book} — رقم {item.reference}
+                  المصدر: {item.book}
+                  {item.reference ? ` — رقم الحديث ${item.reference}` : ''}
                 </Text>
               </View>
-            </View>
+            </Pressable>
           )}
           ListFooterComponent={
             <View style={styles.pager}>

@@ -1,28 +1,69 @@
 import { Platform } from "react-native";
-import * as Notifications from "expo-notifications";
 import type { PrayerTimesResult } from "@/lib/api/types";
 
 /**
  * إشعار الأذان (Task 10) — جدولة إشعار محلي فوقت كل صلاة بصوت أذان حقيقي.
  *
- * ⚠️ قيود Expo Go (مهمة — كما نبه المستخدم):
- * من SDK 53 صعودًا، expo-notifications **غير مدعوم إطلاقًا داخل Expo Go**
- * (الـ push وسمات كثيرة من المحلية). القنوات المخصصة والأصوات المخصصة تعمل
- * فقط في **development build حقيقي**:
- *   npx eas build --profile development
- * ثم تثبيت الناتج على الجهاز. في Expo Go ستفشل setNotificationChannelAsync
- * بصمت أو بخطأ — الكود هنا يتعامل مع ذلك بلطف (try/catch) دون تعطيل التطبيق.
+ * ⚠️ Expo Go guard (إصلاح كراش الإقلاع):
+ * من SDK 53 صعودًا، **استيراد expo-notifications نفسه يرمي خطأ** داخل Expo Go
+ * على أندرويد (وحدة الإشعارات أزيلت من Expo Go). لذلك:
+ *   1. لا يوجد import ساكن هنا — الوحدة تُحمَّل كسولًا داخل try/catch
+ *      (lazy require) فقط عندما نحتاجها فعلاً.
+ *   2. isExpoGo() تكتشف بيئة Expo Go عبر Constants 1 و 2 (كما توصي Expo)،
+ *      وكل الدوال العامة تعود بأمان إن كنا داخل Expo Go.
+ *   3. بذلك لا يسقط تحميل settings.tsx أو _layout.tsx — وهو ما كان يسبب
+ *      "missing the required default export" و"Cannot read property
+ *      'ErrorBoundary' of undefined" معًا.
+ *
+ * في development build حقيقي (npx eas build --profile development) كل شيء
+ * يعمل: القناة المخصصة "adhan" بأولوية MAX + صوت الأذان res/raw.
  *
  * صوت الأذان:
- *  - Android: الملف يجب أن يكون في res/raw (أسماء صغيرة) وترتبط بالقناة —
- *    نستخدم resource `adhan_short`. أضف الملف يدويًا في
- *    android/app/src/main/res/raw/adhan_short.mp3 عند الـ prebuild
- *    (أو عبر config plugin). البديل المؤقت: نستعمل الافتراضي إن غاب الملف.
- *  - iOS: الملف داخل بندل التطبيق مع الامتداد ("adhan_short.wav").
- *  - المستخدم يستطيع رفع ملف أذان بنفسه — انظر التعليمات في التقرير.
+ *  - Android: android/app/src/main/res/raw/adhan_short.mp3 (بعد prebuild).
+ *  - iOS: assets/sounds/adhan_short.wav داخل بندل التطبيق.
  */
 
 export const ADHAN_CHANNEL_ID = "adhan";
+
+type NotificationsModule = typeof import("expo-notifications");
+
+let cachedModule: NotificationsModule | null | undefined;
+
+/** كشف بيئة Expo Go (الطريقة الرسمية الموثقة من Expo). */
+export function isExpoGo(): boolean {
+  try {
+    // require هنا مقصود: تجنب أي استيراد ساكن لexpo-constants في مسار التقييم.
+    const Constants = require("expo-constants") as {
+      executionEnvironment?: number;
+      ExecutionEnvironment?: { Bare?: number; StoreClient?: number };
+    };
+    const env = Constants?.executionEnvironment;
+    const Bare = Constants?.ExecutionEnvironment?.Bare;
+    if (env === undefined || Bare === undefined) return false;
+    return env !== Bare;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * تحميل expo-notifications بأمان — يعيد null داخل Expo Go أو عند فشل الوحدة
+ * (النداءات الخطأ يظهر مرة واحدة كتحذير مكتوم وليس كراش تطبيق).
+ */
+function getNotifications(): NotificationsModule | null {
+  if (cachedModule !== undefined) return cachedModule;
+  if (isExpoGo()) {
+    cachedModule = null;
+    return null;
+  }
+  try {
+    cachedModule = require("expo-notifications") as NotificationsModule;
+  } catch {
+    // وحدة غير متاحة (Expo Go / بناء بلا إشعارات) — تعطيل هادئ للميزة.
+    cachedModule = null;
+  }
+  return cachedModule;
+}
 
 const PRAYER_ROWS = [
   { key: "Fajr", nameAr: "الفجر", body: "الصلاة خير من النوم" },
@@ -33,19 +74,26 @@ const PRAYER_ROWS = [
 ] as const;
 
 export function configureNotificationHandler(): void {
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-    }),
-  });
+  const Notifications = getNotifications();
+  if (!Notifications) return;
+  try {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+      }),
+    });
+  } catch {
+    // غير مدعوم في هذه البيئة — تجاهل.
+  }
 }
 
 /** إنشاء قناة "adhan" بأولوية MAX وصوت الأذان (أندرويد فقط). */
 export async function ensureAdhanChannel(): Promise<boolean> {
-  if (Platform.OS !== "android") return true;
+  const Notifications = getNotifications();
+  if (!Notifications || Platform.OS !== "android") return Boolean(Notifications);
   try {
     await Notifications.setNotificationChannelAsync(ADHAN_CHANNEL_ID, {
       name: "الأذان",
@@ -57,7 +105,6 @@ export async function ensureAdhanChannel(): Promise<boolean> {
     });
     return true;
   } catch {
-    // Expo Go أو جهاز بلا دعم — لا نعطل التطبيق.
     return false;
   }
 }
@@ -78,17 +125,28 @@ function parseTimeToClock(time: string): { hour: number; minute: number } | null
 export async function scheduleAdhanNotifications(
   prayerTimes: PrayerTimesResult,
 ): Promise<{ scheduled: number; reason?: string }> {
+  const Notifications = getNotifications();
+  if (!Notifications) {
+    return {
+      scheduled: 0,
+      reason: "الإشعارات تتطلب development build — غير مدعومة في Expo Go",
+    };
+  }
   const channelOk = await ensureAdhanChannel();
   if (!channelOk && Platform.OS === "android") {
-    return { scheduled: 0, reason: "الإشعارات تتطلب development build (ليست مدعومة في Expo Go)" };
+    return { scheduled: 0, reason: "تعذر إنشاء قناة الإشعارات على هذا الجهاز" };
   }
 
-  // إلغاء كل الإشعارات المجدولة سابقًا (نظف ثم جدول من جديد).
-  const pending = await Notifications.getAllScheduledNotificationsAsync();
-  for (const notification of pending) {
-    if (notification.content.data?.kind === "adhan") {
-      await Notifications.cancelScheduledNotificationAsync(notification.identifier);
+  try {
+    // إلغاء القديم ثم جدولة الجديد.
+    const pending = await Notifications.getAllScheduledNotificationsAsync();
+    for (const notification of pending) {
+      if (notification.content.data?.kind === "adhan") {
+        await Notifications.cancelScheduledNotificationAsync(notification.identifier);
+      }
     }
+  } catch {
+    // إن فشل الإلغاء نكمل — الجدولة الجديدة تبقى أفضل من لا شيء.
   }
 
   let scheduled = 0;
@@ -109,20 +167,35 @@ export async function scheduleAdhanNotifications(
           sound: Platform.OS === "ios" ? "adhan_short.wav" : undefined,
           data: { kind: "adhan", prayer: prayer.key },
         },
-        trigger: Platform.OS === "android"
-          ? { type: Notifications.SchedulableTriggerInputTypes.DAILY, channelId: ADHAN_CHANNEL_ID, hour: clock.hour, minute: clock.minute }
-          : { type: Notifications.SchedulableTriggerInputTypes.DAILY, hour: clock.hour, minute: clock.minute },
+        trigger:
+          Platform.OS === "android"
+            ? {
+                type: Notifications.SchedulableTriggerInputTypes.DAILY,
+                channelId: ADHAN_CHANNEL_ID,
+                hour: clock.hour,
+                minute: clock.minute,
+              }
+            : {
+                type: Notifications.SchedulableTriggerInputTypes.DAILY,
+                hour: clock.hour,
+                minute: clock.minute,
+              },
       });
       scheduled += 1;
     } catch {
       // تجاهل الفردية — نكمل جدولة بقية الصلوات.
     }
   }
-  return { scheduled, reason: scheduled === 0 ? "لا صلوات متبقية اليوم أو الإشعارات غير مدعومة" : undefined };
+  return {
+    scheduled,
+    reason: scheduled === 0 ? "لا صلوات متبقية اليوم أو الإشعارات غير مدعومة" : undefined,
+  };
 }
 
 /** إلغاء كل إشعارات الأذان (لما يطفئ المستخدم التنبيهات من الإعدادات). */
 export async function cancelAdhanNotifications(): Promise<void> {
+  const Notifications = getNotifications();
+  if (!Notifications) return;
   try {
     const pending = await Notifications.getAllScheduledNotificationsAsync();
     for (const notification of pending) {
@@ -131,7 +204,7 @@ export async function cancelAdhanNotifications(): Promise<void> {
       }
     }
   } catch {
-    // Expo Go — تجاهل.
+    // بيئة بلا دعم — تجاهل.
   }
 }
 
@@ -140,6 +213,8 @@ export async function cancelAdhanNotifications(): Promise<void> {
  * والصوت، ليتأكد المستخدم أن الصوت يعمل دون انتظار وقت صلاة.
  */
 export async function playAdhanTestNotification(): Promise<boolean> {
+  const Notifications = getNotifications();
+  if (!Notifications) return false;
   const channelOk = await ensureAdhanChannel();
   if (!channelOk && Platform.OS === "android") return false;
   try {
@@ -150,7 +225,11 @@ export async function playAdhanTestNotification(): Promise<boolean> {
         sound: Platform.OS === "ios" ? "adhan_short.wav" : undefined,
         data: { kind: "adhan-test" },
       },
-      trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, channelId: Platform.OS === "android" ? ADHAN_CHANNEL_ID : undefined, seconds: 2 },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        channelId: Platform.OS === "android" ? ADHAN_CHANNEL_ID : undefined,
+        seconds: 2,
+      },
     });
     return true;
   } catch {

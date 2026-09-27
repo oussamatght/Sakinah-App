@@ -146,3 +146,51 @@ export async function getWirdSummary(): Promise<{
     totalCompletedDays: days.filter((record) => record.completed).length,
   };
 }
+
+// ---------------------------------------------------------------------------
+// المنطق الحسابي الوحيد للورد (يُستعمل من كل الشاشات — لا حسابات داخل UI):
+//   remaining = max(dailyGoal - completed, 0)
+//   progress  = dailyGoal > 0 ? min(completed / dailyGoal, 1) : 0
+// ---------------------------------------------------------------------------
+
+export type WirdProgress = {
+  /** الهدف اليومي المشتق من الهدف المحفوظ (صفحات). */
+  dailyGoal: number;
+  /** الصفحات المقروءة اليوم فقط (مفتاح YYYY-MM-DD). */
+  completed: number;
+  /** max(dailyGoal - completed, 0). */
+  remaining: number;
+  /** dailyGoal > 0 ? min(completed / dailyGoal, 1) : 0 */
+  progress: number;
+  /** هل أُتم الورد اليوم؟ */
+  isComplete: boolean;
+  /** هل يوجد هدف محفوظ أصلًا؟ */
+  hasGoal: boolean;
+};
+
+/** دالة نقية — قابلة للاختبار بلا تخزين، ومصدر الحقيقة الوحيد للحسابات. */
+export function computeWirdProgress(
+  goal: WirdGoal | null,
+  today: WirdDayRecord | null,
+): WirdProgress {
+  const dailyGoal = goal ? effectiveDailyPages(goal) : 0;
+  const completed = today?.pagesRead ?? 0;
+  const remaining = Math.max(dailyGoal - completed, 0);
+  const progress = dailyGoal > 0 ? Math.min(completed / dailyGoal, 1) : 0;
+  return {
+    dailyGoal,
+    completed,
+    remaining,
+    progress,
+    isComplete: dailyGoal > 0 && remaining === 0,
+    hasGoal: goal !== null,
+  };
+}
+
+/** نفس الحساب لكن مع قراءة التخزين — للشاشات. */
+export async function getWirdProgress(): Promise<WirdProgress> {
+  const goal = await getWirdGoal();
+  const days = await getWirdDays();
+  const today = days.find((record) => record.day === localDayKey()) ?? null;
+  return computeWirdProgress(goal, today);
+}

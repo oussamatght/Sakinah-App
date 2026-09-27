@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import {
@@ -25,6 +26,15 @@ import { useColors } from '@/hooks/useColors';
 type Mode = 'books' | 'topics';
 
 /**
+ * إصلاح التداخل مع الـ Tab Bar: المحتوى داخل <Screen scroll={false}> ينتهي
+ * عند حافة الشاشة، والـ Tab Bar (position:absolute في (tabs)/_layout) يرسم
+ * فوقه — أعمق نقطة هي ListFooterComponent حيث زرا "السابق/التالي".
+ * الحل الجذري: حساب ارتفاع التراكب (TabBar 84 وفق _layout + bottom inset)
+ * وإضافته كـ paddingBottom دائم للقائمة — لا حلول مؤقتة ولا إخفاء تحذيرات.
+ */
+const TAB_BAR_HEIGHT = 84; // نفس القيمة المضبوطة في (tabs)/_layout.tsx للويب
+
+/**
  * تبويب الأحاديث — نفس متصفح الأحاديث السابق لكن كتبويب مستقل (الخيار أ).
  * الكتب التسعة + المواضيع الموضوعية، حقل الحديث الموحد
  * (book/reference/grade/attribution) مع حفظ المفضلة.
@@ -32,6 +42,9 @@ type Mode = 'books' | 'topics';
 export default function HadithTab() {
   const colors = useColors();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  // التراكب الحقيقي = ارتفاع الشريط + منطقة الإيماءات أسفله.
+  const bottomOverlap = TAB_BAR_HEIGHT + insets.bottom;
   const booksQuery = useGetHadithBooks();
   const categoriesQuery = useGetHadithCategories();
   const [mode, setMode] = useState<Mode>('books');
@@ -110,7 +123,7 @@ export default function HadithTab() {
                 data={books}
                 keyExtractor={(item) => item.slug}
                 showsVerticalScrollIndicator={false}
-                contentContainerStyle={styles.list}
+                contentContainerStyle={[styles.list, { paddingBottom: bottomOverlap + spacing.md }]}
                 renderItem={({ item }) => (
                   <Pressable
                     testID={`book-${item.slug}`}
@@ -151,7 +164,7 @@ export default function HadithTab() {
                 data={categories}
                 keyExtractor={(item) => item.id}
                 showsVerticalScrollIndicator={false}
-                contentContainerStyle={styles.list}
+                contentContainerStyle={[styles.list, { paddingBottom: bottomOverlap + spacing.md }]}
                 renderItem={({ item }) => (
                   <Pressable
                     testID={`category-${item.id}`}
@@ -215,9 +228,21 @@ export default function HadithTab() {
           data={items}
           keyExtractor={(item, index) => `${item.id}-${index}`}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={[styles.list, { paddingBottom: bottomOverlap + spacing.md }]}
           renderItem={({ item }) => (
-            <View style={[styles.hadithCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="فتح تفصيل الحديث"
+              // HadeethEnc فقط: تفصيله هو المصدر الوحيد للدرجة الحرفية —
+              // بطاقات hadis-api-id (الكتب) لا تفتح تفصيلًا غير موجود.
+              onPress={
+                item.apiSource === "hadeethenc.com"
+                  ? () => router.push(`/hadith-detail?hadithId=${encodeURIComponent(item.id)}`)
+                  : undefined
+              }
+              disabled={item.apiSource !== "hadeethenc.com"}
+              style={[styles.hadithCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+            >
               <View style={styles.hadithTop}>
                 <Text style={[styles.hadithText, { color: colors.foreground }]}>{item.text}</Text>
                 <FavoriteButton
@@ -231,18 +256,22 @@ export default function HadithTab() {
                 />
               </View>
               <View style={styles.hadithMetaRow}>
+                {/* الحكم كما يأتي من المصدر حرفيًا؛ وفي مصدر الكتب التسعة
+                    لا توجد درجة أصلًا (تحقق حي: keys = number,arab,id) —
+                    لذا نعرض "غير متوفر" بصراحة ولا نخترع حكمًا. */}
+                <GradeBadge grade={item.grade} showMissing />
                 {item.attribution ? (
                   <Text style={[styles.hadithMetaText, { color: colors.mutedForeground }]}>الراوي: {item.attribution}</Text>
                 ) : null}
-                <GradeBadge grade={item.grade} />
               </View>
               <View style={styles.hadithFooter}>
                 <Feather name="bookmark" size={14} color={colors.primary} />
                 <Text style={[styles.hadithSource, { color: colors.primary }]} numberOfLines={1}>
-                  {item.book} — رقم {item.reference}
+                  المصدر: {item.book}
+                  {item.reference ? ` — رقم الحديث ${item.reference}` : ''}
                 </Text>
               </View>
-            </View>
+            </Pressable>
           )}
           ListFooterComponent={
             <View style={styles.pager}>

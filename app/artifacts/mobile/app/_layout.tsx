@@ -61,6 +61,7 @@ function RootLayoutNav() {
       <Stack.Screen name="juz-reader" options={{ animation: 'slide_from_left' }} />
       <Stack.Screen name="quran-download" options={{ animation: 'slide_from_left' }} />
       <Stack.Screen name="hadith-browser" options={{ animation: 'slide_from_left' }} />
+      <Stack.Screen name="hadith-detail" options={{ animation: 'slide_from_left' }} />
       <Stack.Screen name="wird-settings" options={{ animation: 'slide_from_left' }} />
       <Stack.Screen name="prayer" options={{ animation: 'slide_from_left' }} />
       <Stack.Screen name="qibla" options={{ animation: 'slide_from_left' }} />

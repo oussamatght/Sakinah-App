@@ -14,7 +14,7 @@ import type { HadithCategoryNode, HadithItem, HadithPage } from "./types";
 
 const HADEETH_ENC = "https://hadeethenc.com/api/v1";
 const HADIS_API = "https://hadis-api-id.vercel.app";
-const SOURCE_NAME = "hadeethenc.com";
+
 
 type HadeethCategoryRaw = {
   id?: unknown;
@@ -99,23 +99,90 @@ export async function fetchHadithCategoryChildren(
 }
 
 // ---------------------------------------------------------------------------
+// Category-title cache (Phase 8): fetchHadithList used to call
+// fetchHadithCategories() on EVERY pagination request just to resolve a
+// title. Fetch once, map ids → titles, dedupe concurrent callers via one
+// in-flight promise. React Query also caches, but this fixes the fetcher
+// itself for every consumer.
+// ---------------------------------------------------------------------------
+
+let categoriesInFlight: Promise<HadithCategoryNode[]> | null = null;
+const categoryTitleCache = new Map<string, string>();
+
+function getCategoriesOnce(): Promise<HadithCategoryNode[]> {
+  if (!categoriesInFlight) {
+    categoriesInFlight = fetchHadithCategories()
+      .then((nodes) => {
+        for (const node of nodes) {
+          categoryTitleCache.set(node.id, node.titleAr);
+          for (const child of node.children) {
+            categoryTitleCache.set(child.id, child.titleAr);
+          }
+        }
+        return nodes;
+      })
+      .catch((error: unknown) => {
+        // اسمح بإعادة المحاولة لاحقًا إن فشل الجلب الأول.
+        categoriesInFlight = null;
+        throw error;
+      });
+  }
+  return categoriesInFlight;
+}
+
+async function categoryTitleFor(categoryId: string): Promise<string> {
+  if (categoryTitleCache.has(categoryId)) {
+    return categoryTitleCache.get(categoryId)!;
+  }
+  try {
+    await getCategoriesOnce();
+  } catch {
+    return "موسوعة الأحاديث";
+  }
+  return categoryTitleCache.get(categoryId) ?? "موسوعة الأحاديث";
+}
+
+// ---------------------------------------------------------------------------
 // List
 // ---------------------------------------------------------------------------
 
+/**
+ * التطبيع (Phase 4):
+ *   text = raw.hadeeth (النص الحديث الحقيقي) — وعناصر البحث تستعمل
+ *   raw.hadith_text. العنوان (title في HadeethEnc هو بداية متن الحديث نفسه).
+ *   ⚠️ raw.explanation لا يُستعمل أبدًا كنص للحديث — هو شرح منفصل (Phase 4).
+ *   reference: قائمة HadeethEnc لا تقدم تخريجًا حقيقيًا — فلا نقدم المعرّف
+ *   الداخلي كرقم حديث (Phase 5)؛ نتركه فارغًا ويعرض الـUI ما توفر فقط.
+ */
 function normalizeListItem(
   raw: JsonRecord,
   categoryTitle?: string,
 ): HadithItem {
+  return normalizeListItemForTest(raw, categoryTitle);
+}
+
+/**
+ * التصدير للفحص الآلي فقط (test-grade-normalization.ts) — نفس المنطق الذي
+ * تستعمله كل القوائم، بلا أي مسار منفصل.
+ */
+export function normalizeListItemForTest(
+  raw: JsonRecord,
+  categoryTitle?: string,
+): HadithItem {
   const text =
-    stringProp(raw.hadeeth) ?? stringProp(raw.explanation) ?? stringProp(raw.title) ?? "";
+    stringProp(raw.hadeeth) ??
+    stringProp(raw.hadith_text) ??
+    stringProp(raw.title) ??
+    "";
   return {
     id: String(raw.id ?? ""),
     text,
     book: categoryTitle ?? "موسوعة الأحاديث",
-    reference: String(raw.id ?? ""),
+    // لا تخريج في استجابة القائمة — المعرّف الداخلي ليس مرجعًا (Phase 5).
+    reference: "",
     ...(stringProp(raw.attribution) ? { attribution: stringProp(raw.attribution)! } : {}),
     ...(stringProp(raw.grade) ? { grade: stringProp(raw.grade)! } : {}),
-    apiSource: SOURCE_NAME,
+    apiSource: "hadeethenc.com",
   };
 }
 
@@ -131,12 +198,9 @@ export async function fetchHadithList(
     "الأحاديث",
   );
   const data = Array.isArray(payload.data) ? payload.data : [];
-  // "book" for thematic hadiths = the category's own title (the highest known
-  // title for this listing) — the old hadithService.ts used the same fallback.
-  const categoryTitle =
-    (await fetchHadithCategories())
-      .flatMap((root) => [root, ...root.children])
-      .find((node) => node.id === categoryId)?.titleAr ?? "موسوعة الأحاديث";
+  // "book" for thematic hadiths = the category's own title (Phase 8: cached —
+  // was re-fetching the whole categories tree on every pagination request).
+  const categoryTitle = await categoryTitleFor(categoryId);
   const items = data
     .filter(isJsonRecord)
     .map((raw) => normalizeListItem(raw, categoryTitle))
@@ -189,17 +253,29 @@ export async function fetchHadithDetail(hadithId: string): Promise<HadithItem> {
     error.code = "HADITH_NOT_FOUND";
     throw error;
   }
-  const text =
-    stringProp(payload.hadeeth) ?? stringProp(payload.explanation) ?? "";
-  const reference = normalizeReference(payload) ?? String(payload.id ?? "");
+  // Phase 4: text and explanation are DIFFERENT pieces of content — never
+  // fall back from hadeeth to explanation (it would show the explanation as
+  // if it were the hadith). Missing hadeeth is handled explicitly.
+  const text = stringProp(payload.hadeeth) ?? "";
+  if (!text.trim()) {
+    const error = new Error("نص هذا الحديث غير متاح من المصدر") as Error & {
+      code?: string;
+    };
+    error.code = "HADITH_TEXT_UNAVAILABLE";
+    throw error;
+  }
+  // Phase 5: real tahrīj only — the internal API id is NOT a reference.
+  const reference = normalizeReference(payload) ?? "";
   return {
     id: String(payload.id ?? ""),
     text,
-    book: title ? title.slice(0, 60) : "موسوعة الأحاديث",
+    book: "موسوعة الأحاديث",
     reference,
     ...(stringProp(payload.attribution) ? { attribution: stringProp(payload.attribution)! } : {}),
     ...(stringProp(payload.grade) ? { grade: stringProp(payload.grade)! } : {}),
-    apiSource: SOURCE_NAME,
+    // Explanation preserved SEPARATELY — the UI renders it under its own heading.
+    ...(stringProp(payload.explanation) ? { explanation: stringProp(payload.explanation)! } : {}),
+    apiSource: "hadeethenc.com",
   };
 }
 
@@ -207,6 +283,17 @@ export async function fetchHadithDetail(hadithId: string): Promise<HadithItem> {
 // Search (upstream can be slow — callers pass a longer timeout via React Query)
 // ---------------------------------------------------------------------------
 
+/**
+ * البحث (Phase 9 — شكل الاستجابة الحقيقي مُتحقق منه حيًا):
+ * HadeethEnc search يرجع مصفوفة عارية من
+ *   { id, title, hadith_text, hadith_text_highlights }
+ * — لا {data, meta} إطلاقًا. الشكل القديم كان يقرأ payload.data → undefined
+ * → نتائج فارغة دائمًا (خطأ فعلي في الإنتاج).
+ * كذلك تحققت حيًا أن page/per_page يُهملهما الخادم (صفحة 1 و2 أعادت نفس
+ * الـ26 عنصرًا) — فلا pagination حقيقي هنا: hasMore=false هو السلوك الأصح
+ * الموثق، ولا نخترع metadata غير موجودة. عناصر البحث بلا grade — تحترم
+ * القاعدة: لا اختراع حكم.
+ */
 export async function searchHadiths(
   phrase: string,
   page: number,
@@ -214,24 +301,23 @@ export async function searchHadiths(
 ): Promise<HadithPage> {
   const safePerPage = Math.min(Math.max(perPage, 1), 50);
   const safePage = Math.max(page, 1);
-  const payload = await fetchJson<{ data?: unknown; meta?: unknown }>(
-    `${HADEETH_ENC}/hadeeths/search/?phrase=${encodeURIComponent(phrase)}&language=ar&page=${safePage}&per_page=${safePerPage}`,
+  const payload = await fetchJson<unknown>(
+    `${HADEETH_ENC}/hadeeths/search/?phrase=${encodeURIComponent(phrase)}&language=ar`,
     "البحث في الأحاديث",
     { timeoutMs: 25_000 },
   );
-  const data = Array.isArray(payload.data) ? payload.data : [];
+  const data = Array.isArray(payload) ? payload : [];
   const items = data
     .filter(isJsonRecord)
     .map((raw) => normalizeListItem(raw))
     .filter((item) => item.id);
-  const meta = isJsonRecord(payload.meta) ? payload.meta : null;
-  const currentPage = meta ? intString(meta.current_page) : undefined;
-  const total = meta ? intString(meta.total_items) : undefined;
   return {
     items,
-    page: currentPage ?? safePage,
+    page: safePage,
     perPage: safePerPage,
-    total: total ?? items.length,
+    total: items.length,
+    // مصدر الحقيقة: الخادم يتجاهل page/per_page في البحث (مُتحقق حيًا) —
+    // النتائج كاملة في استجابة واحدة، لا صفحات تالية.
     hasMore: false,
   };
 }
@@ -280,6 +366,13 @@ export async function fetchHadithBooks(): Promise<HadithBook[]> {
     .sort((a, b) => a.nameAr.localeCompare(b.nameAr, "ar"));
 }
 
+/**
+ * hadis-api-id item (Phase 7) — verified live fields: { number, arab, id }.
+ * text = raw.arab exactly as returned (never modified).
+ * grade: the API provides NO grading field — it stays undefined, and the UI
+ * must NOT infer a grade from the book name ("صحيح البخاري" is book info,
+ * not an authenticity verdict).
+ */
 function mapHadisApiItem(raw: JsonRecord, bookName: string): HadithItem {
   const number = intString(raw.number, 0) ?? 0;
   return {
@@ -287,6 +380,7 @@ function mapHadisApiItem(raw: JsonRecord, bookName: string): HadithItem {
     text: String(raw.arab ?? ""),
     book: bookName,
     reference: String(number),
+    apiSource: "hadis-api-id",
   };
 }
 
