@@ -4,8 +4,10 @@ export {
   fetchQuranChapters,
   fetchQuranSurah,
   fetchQuranAudio,
+  fetchAyahAudio,
   fetchQuranTafsir,
   fetchQuranJuz,
+  groupQuranVersesByPage,
 } from "./quran";
 export {
   fetchHadithCategories,
@@ -18,6 +20,10 @@ export { fetchPrayerTimes } from "./prayer";
 export {
   fetchHadithBooks,
   fetchBookHadiths,
+  fetchHadithByNumber,
+  fetchHadithSection,
+  getHadithBookSections,
   type HadithBook,
+  type HadithBookSection,
 } from "./hadith";
 export { fetchQuranChapterPages } from "./quran";

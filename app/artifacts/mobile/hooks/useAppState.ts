@@ -11,28 +11,57 @@ import {
   saveSettings,
 } from "@/lib/storage";
 
-/** Settings loaded once from storage; save() persists and updates state. */
+/**
+ * الإعدادات مصدر حقيقة واحد مشترك (Module-level store + observers):
+ * كل الشاشات التي تستدعي useSettings تشارك نفس الكائن، وحين تحفظ شاشة
+ * (مثل fontScale من settings.tsx) يُبلَّغ كل مستمع فيتحدث كل مكان يعرض نصًا
+ * قرآنيًا فورًا — حتى الشاشات المفتوحة تحت الشاشة الحالية في الـ Stack.
+ * (السابق: useState محلي لكل شاشة — حفظ الإعدادات لا يُعيد رسم الشاشات
+ * الأخرى أبدًا، فبدا تغيير الحجم لا يعمل.)
+ */
+let sharedSettings: AppSettings = DEFAULT_SETTINGS;
+type SettingsListener = (next: AppSettings) => void;
+const settingsListeners = new Set<SettingsListener>();
+
+function notifySettingsListeners(next: AppSettings) {
+  for (const listener of settingsListeners) listener(next);
+}
+
 export function useSettings() {
-  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [settings, setSettings] = useState<AppSettings>(sharedSettings);
   const [ready, setReady] = useState(false);
 
+  // مزامنة أول تحميل من التخزين مرة واحدة (أول مستخدم يملأ المتجر المشترك).
   useEffect(() => {
     let active = true;
     void (async () => {
       const value = await getSettings();
-      if (active) {
-        setSettings(value);
-        setReady(true);
-      }
+      if (!active) return;
+      sharedSettings = value;
+      notifySettingsListeners(value);
+      setSettings(value);
+      setReady(true);
     })();
     return () => {
       active = false;
     };
   }, []);
 
+  // الاشتراك: أي save() من أي شاشة يبث القيمة الجديدة لكل الشاشات.
+  useEffect(() => {
+    const listener: SettingsListener = (next) => setSettings(next);
+    settingsListeners.add(listener);
+    return () => {
+      settingsListeners.delete(listener);
+    };
+  }, []);
+
   const save = useCallback(async (patch: Partial<AppSettings>) => {
     const next = await saveSettings(patch);
-    setSettings(next);
+    sharedSettings = next;
+    notifySettingsListeners(next);
+    // TEMP DEBUG (fontScale) — حذفها بعد التحقق البصري.
+    if (__DEV__) console.log("[SETTINGS DEBUG] saved:", JSON.stringify(patch), "→ fontScale =", next.fontScale);
   }, []);
 
   return { settings, ready, save };

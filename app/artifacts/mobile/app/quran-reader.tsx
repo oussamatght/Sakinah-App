@@ -1,9 +1,32 @@
-import React, { useEffect, useState } from 'react';
-import { Linking, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  FlatList,
+  Linking,
+  Modal,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { useGetQuranAudio, useGetQuranReader, useGetQuranTafsir } from '@/lib/api';
-import { saveReadingPosition } from '@/lib/storage';
+import {
+  setAudioModeAsync,
+  useAudioPlayer,
+  useAudioPlayerStatus,
+  type AudioPlayer,
+} from 'expo-audio';
+import { useFonts, AmiriQuran_400Regular } from '@expo-google-fonts/amiri-quran';
+import {
+  groupQuranVersesByPage,
+  useGetAyahAudio,
+  useGetQuranAudio,
+  useGetQuranReader,
+  useGetQuranTafsir,
+} from '@/lib/api';
+import { getReadingPosition, saveReadingPosition } from '@/lib/storage';
 import {
   ErrorState,
   IconButton,
@@ -14,38 +37,193 @@ import {
 import { FavoriteButton } from '@/components/FavoriteButton';
 import { radii, spacing, typography } from '@/constants/tokens';
 import { useColors } from '@/hooks/useColors';
+import { useSettings } from '@/hooks/useAppState';
 
+/** أرقام عربية للعلامات (عرض فقط — نص الآيات كما هو من الـ API حرفيًا). */
+function toArabicDigits(value: number): string {
+  return String(value).replace(/[0-9]/g, (d) => '٠١٢٣٤٥٦٧٨٩'[Number(d)]);
+}
+
+/** خط المصحف — حجمه البصري أصغر من Inter فنرفع الأساس قليلًا (٣١ مكافئ). */
+const MUSHAF_BASE = Math.round(typography.quranLarge * 1.15);
+/** اسم عائلة الخط كما سُجل في useFonts (مفتاح التحميل نفسه). */
+const MUSHAF_FONT = 'AmiriQuran_400Regular';
+
+type PageGroup = {
+  page: number;
+  verses: { verseKey: string; verseNumber: number; text: string }[];
+};
+
+/**
+ * قارئ المصحف (إعادة بناء):
+ *  - نص متصل مثل صفحة المصحف: آيات متتالية في <Text> واحد بعلامات أرقام
+ *    الآيات — لا Card لكل آية.
+ *  - صفحات حقيقية من الـ API (verse.page) في FlatList أفقي pagingEnabled —
+ *    virtualization حقيقي (3 صفحات في الذاكرة) وبلا أي nested VirtualizedList
+ *    (محتوى الصفحة نص + ScrollView عمودي بمحور مختلف).
+ *  - الضغط على آية → Bottom sheet: الآية + التفسير + تشغيل صوت الآية
+ *    (api.quran.com by_ayah — نفس recitation API الحالي) + المفضلة + مشاركة.
+ *  - الآية قيد التلاوة تُظلل بلون خلفية فقط — النص لا يتغير أبدًا.
+ *  - آخر موضع قراءة والمفضلة: نفس التخزين الحالي (نفس المفاتيح والأشكال).
+ *  - fontScale من المتجر المشترك يتحكم بكل النص القرآني ديناميكيًا.
+ */
 export default function QuranReader() {
   const colors = useColors();
   const router = useRouter();
   const { surah, surahId } = useLocalSearchParams<{ surah?: string; surahId?: string }>();
   const id = Number(surahId);
   const validId = Number.isInteger(id) && id >= 1 && id <= 114;
-  // "آية 1" until the user taps a verse — the tafsir card then follows the tap.
-  const [tafsirAyah, setTafsirAyah] = useState(1);
-  // Bottom-sheet visibility; tafsirAyah holds which verse the sheet shows.
-  const [tafsirOpen, setTafsirOpen] = useState(false);
+
+  // fontScale من المتجر المشترك (الإعدادات تُحدّث هذه الشاشة فورًا).
+  const { settings } = useSettings();
+  const fontScale = settings.fontScale;
+  const mushafSize = Math.round(MUSHAF_BASE * fontScale);
+  const mushafLineHeight = Math.round(mushafSize * 2);
+  const bannerSize = Math.round(typography.quranMedium * 1.2 * fontScale);
+  const sheetVerseSize = Math.round(typography.quranMedium * fontScale);
+  const sheetVerseLineHeight = Math.round(sheetVerseSize * 1.9);
+
+  // خط أميري قرآن — يدعم الحركات/الشدة/المد/الهمزات/علامات الوقف كاملة.
+  const [fontsLoaded, fontError] = useFonts({ AmiriQuran_400Regular });
+
+  // "آية 1" حتى أول ضغط؛ الـ sheet يتبع الآية المختارة.
+  const [selectedAyah, setSelectedAyah] = useState(1);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  // آية التلاوة الحالية (null = صامت) — منفصلة عن الاختيار.
+  const [playingAyah, setPlayingAyah] = useState<number | null>(null);
+  // آخر موضع محفوظ (يُقرأ مرة لتموضع الصفحة/الآية) ثم يُفعَّل العرض.
+  const [resume, setResume] = useState<{ ayah: number; page: number } | null>(null);
+  const [resumeLoaded, setResumeLoaded] = useState(false);
+  // الصفحة المعروضة (للمؤشر العلوي).
+  const [viewedPage, setViewedPage] = useState<number | null>(null);
+  // أبعاد منطقة الصفحات — تُمرر حجمًا صريحًا لكل عنصر قائمة (إصلاح الصفحة
+  // الفارغة: عنصر قائمة أفقية لا يحسب ارتفاعه تلقائيًا فانهار إلى صفر).
+  const [pagesArea, setPagesArea] = useState({ width: 0, height: 0 });
+
   const readerQuery = useGetQuranReader(validId ? id : 0, {
     query: { enabled: validId },
   });
-  const audioQuery = useGetQuranAudio(validId ? id : 0, {
+  const chapterAudioQuery = useGetQuranAudio(validId ? id : 0, {
     query: { enabled: validId },
   });
-  const tafsirQuery = useGetQuranTafsir(validId ? id : 0, tafsirAyah, {
-    query: { enabled: validId },
+  const tafsirQuery = useGetQuranTafsir(validId ? id : 0, selectedAyah, {
+    query: { enabled: validId && sheetOpen },
   });
+  const ayahAudioQuery = useGetAyahAudio(validId ? id : 0, playingAyah);
 
-  // Auto-save the open position — no user action needed. Hooks must run on
-  // EVERY render (Rules of Hooks), so this lives before any early return.
+  // مشغل واحد يُعاد استخدامه لكل الآيات (replace عند تغيير الآية).
+  const player: AudioPlayer = useAudioPlayer(undefined);
+  const audioStatus = useAudioPlayerStatus(player);
+
+  // وضع الصوت: يعمل حتى في الوضع الصامت (مرة واحدة عند أول تشغيل).
+  const audioModeConfigured = useRef(false);
   useEffect(() => {
-    if (!validId) return;
+    if (playingAyah === null || audioModeConfigured.current) return;
+    audioModeConfigured.current = true;
+    void setAudioModeAsync({ playsInSilentMode: true }).catch(() => undefined);
+  }, [playingAyah]);
+
+  // عند وصول رابط صوت الآية: حمّله في المشغل وشغّله فورًا.
+  const ayahAudioUrl = ayahAudioQuery.data?.audioUrl ?? null;
+  useEffect(() => {
+    if (!playingAyah || !ayahAudioUrl) return;
+    player.replace({ uri: ayahAudioUrl });
+    player.play();
+  }, [player, playingAyah, ayahAudioUrl]);
+
+  // نهاية الآية → التالية تلقائيًا (تلاوة متصلة داخل السورة)؛ الآية الأخيرة توقف.
+  const verses = readerQuery.data?.verses ?? [];
+  useEffect(() => {
+    if (!audioStatus.didJustFinish || playingAyah === null) return;
+    if (playingAyah < verses.length) {
+      const next = playingAyah + 1;
+      setPlayingAyah(next);
+      setSelectedAyah(next);
+    } else {
+      setPlayingAyah(null);
+    }
+  }, [audioStatus.didJustFinish, playingAyah, verses.length]);
+
+  // آخر موضع: قرأته مرة للتموضع، ثم حفظ تلقائي عند كل فتح/اختيار (نفس الشكل).
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const position = await getReadingPosition();
+        if (!active || !position || position.surahId !== id) {
+          setResume({ ayah: 1, page: 0 });
+          return;
+        }
+        setResume({ ayah: position.ayahNumber, page: 0 });
+      } catch {
+        if (active) setResume({ ayah: 1, page: 0 });
+      } finally {
+        if (active) setResumeLoaded(true);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+    // مرة واحدة عند تغيّر السورة.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  useEffect(() => {
+    if (!validId || !resumeLoaded) return;
     void saveReadingPosition({
       surahId: id,
       surahName: surah,
-      ayahNumber: tafsirAyah,
+      ayahNumber: selectedAyah,
     });
-  }, [validId, id, surah, tafsirAyah]);
+  }, [validId, id, surah, selectedAyah, resumeLoaded]);
 
+  // الصفحات الحقيقية من بيانات الـ API (verse.page) — منطق مشترك مُختبر.
+  const pages = useMemo<PageGroup[]>(() => groupQuranVersesByPage(verses), [verses]);
+
+  // بعد معرفة الصفحات: قفز أولي لصفحة آخر موضع (فقرة savedAyah).
+  const [initialPageIndex, setInitialPageIndex] = useState<number | null>(null);
+  useEffect(() => {
+    if (!resumeLoaded || !resume || pages.length === 0) return;
+    const saved = verses.find((verse) => verse.verseNumber === resume.ayah);
+    const index = saved ? pages.findIndex((group) => group.page === saved.page) : -1;
+    setInitialPageIndex(index >= 0 ? index : 0);
+    setSelectedAyah(resume.ayah);
+    // يعمل مرة واحدة بعد أول تحميل للصفحات.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resumeLoaded, pages.length === 0]);
+
+  const onAyahPress = useCallback((verseNumber: number) => {
+    setSelectedAyah(verseNumber);
+    setSheetOpen(true);
+  }, []);
+
+  const toggleAyahAudio = useCallback(
+    (verseNumber: number) => {
+      setPlayingAyah((current) => {
+        if (current === verseNumber) {
+          player.pause();
+          return null;
+        }
+        if (current !== null) player.pause();
+        return verseNumber;
+      });
+    },
+    [player],
+  );
+
+  const shareAyah = useCallback(async () => {
+    const verse = verses.find((item) => item.verseNumber === selectedAyah);
+    if (!verse) return;
+    try {
+      await Share.share({
+        message: `${verse.text}\n﴿${toArabicDigits(verse.verseNumber)}﴾ ${surahData_nameArabic(readerQuery.data?.nameArabic)} — الآية ${verse.verseNumber}`,
+      });
+    } catch {
+      // المشاركة اختيارية — إلغاء المستخدم ليس خطأ.
+    }
+  }, [verses, selectedAyah, readerQuery.data?.nameArabic]);
+
+  // ---------- الشاشات المبكرة (كل الـ hooks أعلاه قبلها — Rules of Hooks) ----------
   if (!validId) {
     return (
       <Screen>
@@ -55,7 +233,7 @@ export default function QuranReader() {
     );
   }
 
-  if (readerQuery.isPending) {
+  if (readerQuery.isPending || (!fontsLoaded && !fontError)) {
     return (
       <Screen>
         <LoadingState />
@@ -64,8 +242,7 @@ export default function QuranReader() {
   }
 
   if (readerQuery.isError || !readerQuery.data) {
-    // Fix 9: a failed saved-position open must not strand the user on a dead
-    // end — offer going straight to the surah list (the Quran tab).
+    // Fix 9: فشل فتح آخر موضع لا يترك المستخدم في طريق مسدود.
     return (
       <Screen>
         <IconButton icon="arrow-right" label="العودة" onPress={() => router.back()} variant="soft" />
@@ -92,16 +269,57 @@ export default function QuranReader() {
   }
 
   const surahData = readerQuery.data;
-  const verses = readerQuery.data?.verses ?? [];
   const firstVerse = verses[0];
-  const audioLabel = audioQuery.isPending
+  const chapterAudioLabel = chapterAudioQuery.isPending
     ? 'جارٍ تجهيز الصوت'
-    : audioQuery.isError
+    : chapterAudioQuery.isError
       ? 'تعذر تحميل الصوت'
-      : 'استماع للسورة';
+      : 'استماع للسورة كاملة';
+  const showBismillahBanner = id !== 1 && id !== 9; // الفاتحة: البسملة آيتها 1؛ التوبة: لا بسملة
+  // هل آية التلاوة الحالية معروضة على الصفحة الظاهرة؟
+  const playedVerse = playingAyah !== null ? verses.find((v) => v.verseNumber === playingAyah) : undefined;
+  const isAyahOnViewedPage =
+    playingAyah === null || viewedPage === null || playedVerse?.page === viewedPage;
+
+  const renderItem = ({ item }: { item: PageGroup }) => (
+    <View style={styles.pageContainer}>
+      <ScrollView showsVerticalScrollIndicator={false} style={styles.pageScroll}>
+        <View style={styles.pageInner}>
+          {/* نص متصل: آيات متتابعة داخل Text واحد — span لكل آية قابل للضغط */}
+          <Text style={[styles.mushafText, { fontSize: mushafSize, lineHeight: mushafLineHeight, color: colors.foreground }]}>
+            {item.verses.map((verse) => {
+              const isPlaying = playingAyah === verse.verseNumber;
+              const isSelected = sheetOpen && selectedAyah === verse.verseNumber && !isPlaying;
+              return (
+                <Text
+                  key={verse.verseKey}
+                  testID={`ayah-${verse.verseNumber}`}
+                  onPress={() => onAyahPress(verse.verseNumber)}
+                  style={[
+                    styles.ayahSpan,
+                    isPlaying && { backgroundColor: colors.primary, color: colors.primaryForeground },
+                    isSelected && { backgroundColor: colors.secondary },
+                  ]}
+                >
+                  {verse.text}
+                  <Text style={[styles.ayahMarker, isPlaying && { color: colors.primaryForeground }]}>
+                    {' '}﴿{toArabicDigits(verse.verseNumber)}﴾
+                  </Text>
+                  {' '}
+                </Text>
+              );
+            })}
+          </Text>
+        </View>
+      </ScrollView>
+      <Text style={[styles.pageFooter, { color: colors.mutedForeground }]}>
+        صفحة {toArabicDigits(item.page)}
+      </Text>
+    </View>
+  );
 
   return (
-    <Screen>
+    <Screen scroll={false} contentStyle={styles.readerContent}>
       <View style={styles.readerHeader}>
         <IconButton icon="arrow-right" label="العودة" onPress={() => router.back()} variant="soft" />
         <View style={styles.readerTitle}>
@@ -109,95 +327,89 @@ export default function QuranReader() {
             {surahData.nameArabic || surah || 'القرآن الكريم'}
           </Text>
           <Text style={[styles.readerMeta, { color: colors.mutedForeground }]}>
-            {firstVerse ? `الجزء ${firstVerse.juz} • الصفحة ${firstVerse.page}` : 'قراءة مباشرة'}
+            {surahData.revelationPlace === 'makkah' ? 'مكية' : 'مدنية'} • {surahData.versesCount} آية
+            {viewedPage ? ` • صفحة ${toArabicDigits(viewedPage)}` : ''}
           </Text>
+          {/* آية قيد التلاوة في صفحة أخرى (قلّب المستخدم الصفحة يدويًا):
+              نستمر بالتشغيل بصمت مع مؤشر نصي بسيط — بلا قفز قسري للصفحة. */}
+          {playingAyah !== null && !isAyahOnViewedPage ? (
+            <Text style={[styles.remoteAudioHint, { color: colors.primary }]}>
+              جارٍ تشغيل الآية {toArabicDigits(playingAyah)} — من صفحة أخرى
+            </Text>
+          ) : null}
         </View>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={audioLabel}
-          disabled={!audioQuery.data?.audioUrl}
+          accessibilityLabel={chapterAudioLabel}
+          disabled={!chapterAudioQuery.data?.audioUrl}
           onPress={() => {
-            const audioUrl = audioQuery.data?.audioUrl;
+            const audioUrl = chapterAudioQuery.data?.audioUrl;
             if (audioUrl) void Linking.openURL(audioUrl);
           }}
           style={({ pressed }) => [
             styles.audioButton,
             {
               backgroundColor: colors.secondary,
-              opacity: pressed || !audioQuery.data?.audioUrl ? 0.45 : 1,
+              opacity: pressed || !chapterAudioQuery.data?.audioUrl ? 0.45 : 1,
             },
           ]}
         >
           <Feather name="headphones" size={18} color={colors.primary} />
-          <Text style={[styles.audioText, { color: colors.primary }]}>استماع</Text>
+          <Text style={[styles.audioText, { color: colors.primary }]}>السورة</Text>
         </Pressable>
       </View>
-      {audioQuery.isPending ? (
-        <Text style={[styles.statusText, { color: colors.mutedForeground }]}>جارٍ تحميل الصوت...</Text>
+
+      {showBismillahBanner ? (
+        <View style={[styles.bismillah, { borderColor: colors.border }]}>
+          <Text
+            style={[
+              styles.bismillahText,
+              { color: colors.primary, fontSize: bannerSize, fontFamily: MUSHAF_FONT },
+            ]}>
+            بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ
+          </Text>
+        </View>
       ) : null}
-      {audioQuery.isError ? (
-        <Text style={[styles.statusText, { color: colors.mutedForeground }]}>
-          تعذر تحميل الصوت، يمكنك متابعة القراءة دون اتصال صوتي.
-        </Text>
-      ) : null}
-      <View style={[styles.bismillah, { borderColor: colors.border }]}>
-        <Text style={[styles.bismillahText, { color: colors.primary }]}>بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ</Text>
-      </View>
-      {verses.length === 0 ? (
+
+      {pages.length === 0 ? (
         <Text style={[styles.statusText, { color: colors.mutedForeground }]}>لا توجد آيات متاحة لهذه السورة.</Text>
+      ) : initialPageIndex === null || pagesArea.width === 0 ? (
+        <View style={styles.pagesWrap} onLayout={(event) => {
+          const { width, height } = event.nativeEvent.layout;
+          if (width > 0 && height > 0) {
+            setPagesArea((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
+          }
+        }} />
       ) : (
-        verses.map((ayah) => (
-          <Pressable
-            key={ayah.id}
-            testID={`ayah-${ayah.verseNumber}`}
-            accessibilityRole="button"
-            accessibilityLabel={`الآية ${ayah.verseNumber}`}
-            onPress={() => {
-              setTafsirAyah(ayah.verseNumber);
-              setTafsirOpen(true);
-            }}
-            style={({ pressed }) => [
-              styles.ayah,
-              tafsirAyah === ayah.verseNumber && {
-                backgroundColor: colors.accent,
-              },
-              { borderBottomColor: colors.border, opacity: pressed ? 0.72 : 1 },
-            ]}
-          >
-            <View style={[styles.ayahNumber, { backgroundColor: colors.secondary }]}>
-              <Text style={[styles.ayahNumberText, { color: colors.primary }]}>{ayah.verseNumber}</Text>
-            </View>
-            <Text style={[styles.ayahText, { color: colors.foreground }]}>{ayah.text}</Text>
-            <FavoriteButton
-              item={{
-                kind: 'ayah',
-                refId: ayah.verseKey,
-                title: `${surahData.nameArabic} — آية ${ayah.verseNumber}`,
-                text: ayah.text,
-                subtitle: `${surahData.nameArabic} : ${ayah.verseNumber}`,
-              }}
-            />
-          </Pressable>
-        ))
+        <View style={styles.pagesWrap}>
+          <FlatListH
+            pages={pages}
+            itemWidth={pagesArea.width}
+            itemHeight={pagesArea.height}
+            initialPageIndex={initialPageIndex}
+            renderItem={renderItem}
+            onPageChange={(page) => setViewedPage(page)}
+          />
+        </View>
       )}
-      {/* Tafsir bottom sheet — opening/refreshing it never blocks reading:
-          the reader stays fully usable when the tafsir API fails. */}
+
+      {/* Bottom sheet: الآية + صوتها + المفضلة + المشاركة + التفسير */}
       <Modal
-        visible={tafsirOpen}
+        visible={sheetOpen}
         transparent
         animationType="slide"
-        onRequestClose={() => setTafsirOpen(false)}
+        onRequestClose={() => setSheetOpen(false)}
       >
-        <Pressable style={styles.sheetBackdrop} onPress={() => setTafsirOpen(false)}>
+        <Pressable style={styles.sheetBackdrop} onPress={() => setSheetOpen(false)}>
           <Pressable
             style={[styles.sheet, { backgroundColor: colors.background }]}
             onPress={() => undefined}
           >
             <View style={[styles.sheetHandle, { backgroundColor: colors.border }]} />
             <View style={styles.sheetHeader}>
-              <View>
+              <View style={styles.sheetTitleCopy}>
                 <Text style={[styles.sheetTitle, { color: colors.foreground }]}>
-                  تفسير الآية {tafsirAyah}
+                  الآية {toArabicDigits(selectedAyah)}
                 </Text>
                 <Text style={[styles.sheetSource, { color: colors.primary }]}>
                   {surahData.nameArabic} • {tafsirQuery.data?.resourceName ?? 'التفسير الميسّر'}
@@ -205,18 +417,92 @@ export default function QuranReader() {
               </View>
               <IconButton
                 icon="x"
-                label="إغلاق التفسير"
-                onPress={() => setTafsirOpen(false)}
+                label="إغلاق"
+                onPress={() => setSheetOpen(false)}
                 variant="soft"
               />
             </View>
-            {verses.find((verse) => verse.verseNumber === tafsirAyah) ? (
-              <View style={[styles.sheetVerse, { backgroundColor: colors.accent }]}> 
-                <Text style={[styles.sheetVerseText, { color: colors.foreground }]}>
-                  {verses.find((verse) => verse.verseNumber === tafsirAyah)?.text}
+
+            <View style={[styles.sheetVerse, { backgroundColor: colors.accent }]}>
+              <Text
+                style={[
+                  styles.sheetVerseText,
+                  {
+                    color: colors.foreground,
+                    fontSize: sheetVerseSize,
+                    lineHeight: sheetVerseLineHeight,
+                    fontFamily: MUSHAF_FONT,
+                  },
+                ]}>
+                {verses.find((verse) => verse.verseNumber === selectedAyah)?.text}
+              </Text>
+            </View>
+
+            {/* أدوات الآية: تشغيل/إيقاف + مفضلة + مشاركة */}
+            <View style={styles.sheetActions}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={
+                  playingAyah === selectedAyah ? 'إيقاف صوت الآية' : 'تشغيل صوت الآية'
+                }
+                onPress={() => toggleAyahAudio(selectedAyah)}
+                style={({ pressed }) => [
+                  styles.actionButton,
+                  {
+                    backgroundColor:
+                      playingAyah === selectedAyah ? colors.primary : colors.secondary,
+                    opacity: pressed ? 0.8 : 1,
+                  },
+                ]}
+              >
+                <Feather
+                  name={playingAyah === selectedAyah ? 'pause' : 'play'}
+                  size={17}
+                  color={playingAyah === selectedAyah ? colors.primaryForeground : colors.primary}
+                />
+                <Text
+                  style={[
+                    styles.actionText,
+                    {
+                      color:
+                        playingAyah === selectedAyah ? colors.primaryForeground : colors.primary,
+                    },
+                  ]}>
+                  {playingAyah === selectedAyah ? 'إيقاف' : 'تشغيل الآية'}
                 </Text>
-              </View>
+              </Pressable>
+              <FavoriteButton
+                item={{
+                  kind: 'ayah',
+                  refId: `${id}:${selectedAyah}`,
+                  title: `${surahData.nameArabic} — آية ${selectedAyah}`,
+                  text: verses.find((verse) => verse.verseNumber === selectedAyah)?.text.slice(0, 220) ?? '',
+                  subtitle: `${surahData.nameArabic} : ${selectedAyah}`,
+                }}
+                variant="soft"
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="مشاركة الآية"
+                onPress={() => void shareAyah()}
+                style={({ pressed }) => [
+                  styles.actionButton,
+                  { backgroundColor: colors.secondary, opacity: pressed ? 0.8 : 1 },
+                ]}
+              >
+                <Feather name="share-2" size={17} color={colors.primary} />
+                <Text style={[styles.actionText, { color: colors.primary }]}>مشاركة</Text>
+              </Pressable>
+            </View>
+
+            {ayahAudioQuery.isError ? (
+              <Text style={[styles.audioStatus, { color: colors.mutedForeground }]}>
+                تعذر تحميل صوت هذه الآية — يمكنك متابعة القراءة.
+              </Text>
+            ) : playingAyah !== null && ayahAudioQuery.isPending ? (
+              <Text style={[styles.audioStatus, { color: colors.mutedForeground }]}>جارٍ تجهيز الصوت…</Text>
             ) : null}
+
             <View style={styles.sheetBody}>
               {tafsirQuery.isPending ? <LoadingState /> : null}
               {tafsirQuery.isError ? (
@@ -224,61 +510,142 @@ export default function QuranReader() {
                   offline={isOfflineError(tafsirQuery.error)}
                   onRetry={() => void tafsirQuery.refetch()}
                 />
-              ) : (
+              ) : tafsirQuery.data ? (
                 <Text style={[styles.sheetTafsirText, { color: colors.foreground }]}>
-                  {tafsirQuery.data?.text?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() ||
+                  {tafsirQuery.data.text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() ||
                     'لا يوجد تفسير متاح لهذه الآية.'}
                 </Text>
-              )}
+              ) : null}
             </View>
           </Pressable>
         </Pressable>
       </Modal>
-      <View style={[styles.readerNote, { backgroundColor: colors.accent }]}>
-        <Feather name="bookmark" size={16} color={colors.primary} />
-        <Text style={[styles.readerNoteText, { color: colors.foreground }]}>
-          اضغط على أي آية لعرض التفسير وحفظ موضع القراءة
-        </Text>
-      </View>
+
+      <Text style={[styles.readerHint, { color: colors.mutedForeground }]}>
+        اضغط أي آية للتفسير والصوت والمفضلة • اسحب بين الصفحات
+      </Text>
     </Screen>
   );
 }
 
+/** اسم السورة بأمان (عرض فقط). */
+function surahData_nameArabic(name: string | undefined): string {
+  return name ?? '';
+}
+
+/**
+ * FlatList أفقي pagingEnabled للصفحات — virtualization حقيقي: صفحات قليلة
+ * فقط في الذاكرة، getItemLayout يجعل القفز الأولي/السريع رخيصًا، ولا يوجد
+ * أي VirtualizedList داخل ScrollView بنفس الاتجاه (التحذير السببي مُصلح).
+ */
+/**
+ * FlatList أفقي pagingEnabled للصفحات — virtualization حقيقي: صفحات قليلة
+ * فقط في الذاكرة، getItemLayout يجعل القفز الأولي/السريع رخيصًا، ولا يوجد
+ * أي VirtualizedList داخل ScrollView بنفس الاتجاه (التحذير السببي مُصلح).
+ * كل عنصر يأخذ حجمًا صريحًا (itemWidth/itemHeight مقاسة من الحاوية) — هذا
+ * أصلح «الصفحة الفارغة»: بدون الحجم الصريح كان عنصر القائمة الأفقية ينهار
+ * ارتفاعه إلى صفر فيظهر المصحف فارغًا بلا أي خطأ (فشل صامت).
+ */
+function FlatListH({
+  pages,
+  itemWidth,
+  itemHeight,
+  initialPageIndex,
+  renderItem,
+  onPageChange,
+}: {
+  pages: PageGroup[];
+  itemWidth: number;
+  itemHeight: number;
+  initialPageIndex: number;
+  renderItem: (info: { item: PageGroup }) => React.ReactElement;
+  onPageChange: (page: number) => void;
+}) {
+  const viewedRef = useRef<number | null>(null);
+  // RN يمنع تغيير onViewableItemsChanged/viewabilityConfig بين الرندرات —
+  // تُثبّتان في refs مرة واحدة (وإلا انهار القارئ بـ Invariant Violation).
+  const onPageChangeRef = useRef(onPageChange);
+  onPageChangeRef.current = onPageChange;
+  const viewabilityConfigRef = useRef({ itemVisiblePercentThreshold: 60 });
+  const onViewableItemsChangedRef = useRef(({ viewableItems }: { viewableItems: Array<{ item: unknown }> }) => {
+    const first = viewableItems[0]?.item as PageGroup | undefined;
+    if (first && viewedRef.current !== first.page) {
+      viewedRef.current = first.page;
+      onPageChangeRef.current(first.page);
+    }
+  });
+
+  return (
+    <FlatList
+      data={pages}
+      keyExtractor={(item) => `page-${item.page}`}
+      horizontal
+      pagingEnabled
+      showsHorizontalScrollIndicator={false}
+      initialNumToRender={1}
+      initialScrollIndex={initialPageIndex > 0 ? initialPageIndex : undefined}
+      getItemLayout={(_, index) => ({
+        length: itemWidth || 1,
+        offset: (itemWidth || 1) * index,
+        index,
+      })}
+      onViewableItemsChanged={onViewableItemsChangedRef.current}
+      viewabilityConfig={viewabilityConfigRef.current}
+      renderItem={(info) => (
+        <View style={{ width: itemWidth, height: itemHeight }}>
+          {renderItem(info)}
+        </View>
+      )}
+    />
+  );
+}
+
 const styles = StyleSheet.create({
-  readerHeader: { alignItems: 'center', flexDirection: 'row-reverse', justifyContent: 'space-between', marginBottom: spacing.lg },
+  // ارتفاع محدد لمحتوى القارئ — بدون flex:1 هنا تنهار منطقة الصفحات إلى
+  // صفر (onLayout لا يعود بأبعاد) فتبقى الصفحة فارغة بلا أي خطأ.
+  readerContent: { flex: 1 },
+  readerHeader: { alignItems: 'center', flexDirection: 'row-reverse', justifyContent: 'space-between', marginBottom: spacing.md },
   readerTitle: { alignItems: 'center', flex: 1 },
   surahTitle: { fontSize: typography.h2, fontWeight: '700' },
   readerMeta: { fontSize: typography.caption, marginTop: 4 },
   audioButton: { alignItems: 'center', borderRadius: radii.pill, flexDirection: 'row-reverse', gap: 5, paddingHorizontal: 10, paddingVertical: 9 },
   audioText: { fontSize: typography.caption, fontWeight: '700' },
   statusText: { fontSize: typography.bodySmall, lineHeight: 22, marginBottom: spacing.md, textAlign: 'right' },
-  bismillah: { alignItems: 'center', borderBottomWidth: 1, borderTopWidth: 1, paddingVertical: spacing.lg },
-  bismillahText: { fontSize: typography.quranMedium, textAlign: 'center' },
-  ayah: { alignItems: 'flex-start', borderBottomWidth: 1, flexDirection: 'row-reverse', gap: spacing.sm, paddingVertical: spacing.lg },
-  ayahNumber: { alignItems: 'center', borderRadius: radii.pill, height: 28, justifyContent: 'center', marginTop: 5, width: 28 },
-  ayahNumberText: { fontSize: typography.caption, fontWeight: '700' },
-  ayahText: { flex: 1, fontSize: typography.quranLarge, lineHeight: 50, textAlign: 'right' },
+  bismillah: { alignItems: 'center', borderBottomWidth: 1, borderTopWidth: 1, paddingVertical: spacing.md, marginBottom: spacing.sm },
+  bismillahText: { textAlign: 'center' },
+  pagesWrap: { flex: 1 },
+  pageContainer: { flex: 1 },
+  pageScroll: { flex: 1 },
+  pageInner: { flexGrow: 1, paddingHorizontal: spacing.xs, paddingTop: spacing.sm },
+  mushafText: { textAlign: 'right', writingDirection: 'rtl' },
+  ayahSpan: {},
+  ayahMarker: { color: '#B8860B' },
+  pageFooter: { alignSelf: 'center', fontSize: typography.caption, paddingVertical: spacing.xs },
   fallbackHint: { fontSize: typography.bodySmall, marginTop: spacing.sm, textAlign: 'center' },
   surahListButton: { alignItems: 'center', alignSelf: 'center', borderRadius: radii.pill, flexDirection: 'row-reverse', gap: 6, paddingHorizontal: spacing.lg, paddingVertical: 11 },
   surahListText: { fontSize: typography.bodySmall, fontWeight: '700' },
-  tafsirCard: { borderRadius: radii.sm, marginTop: spacing.lg, padding: spacing.md },
   sheetBackdrop: { backgroundColor: 'rgba(0,0,0,0.45)', flex: 1, justifyContent: 'flex-end' },
   sheet: {
     borderTopLeftRadius: radii.lg,
     borderTopRightRadius: radii.lg,
-    maxHeight: '82%',
+    maxHeight: '85%',
     paddingBottom: spacing.xl,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.sm,
   },
   sheetHandle: { alignSelf: 'center', borderRadius: radii.pill, height: 4, marginBottom: spacing.md, width: 44 },
   sheetHeader: { alignItems: 'center', flexDirection: 'row-reverse', justifyContent: 'space-between' },
+  sheetTitleCopy: { alignItems: 'flex-end', flex: 1 },
   sheetTitle: { fontSize: typography.h3, fontWeight: '700', textAlign: 'right' },
   sheetSource: { fontSize: typography.caption, marginTop: 2, textAlign: 'right' },
   sheetVerse: { borderRadius: radii.sm, marginTop: spacing.md, padding: spacing.md },
-  sheetVerseText: { fontSize: typography.quranMedium, lineHeight: 38, textAlign: 'right' },
+  sheetVerseText: { textAlign: 'right' },
+  sheetActions: { alignItems: 'center', flexDirection: 'row-reverse', gap: spacing.sm, marginTop: spacing.md },
+  actionButton: { alignItems: 'center', borderRadius: radii.pill, flexDirection: 'row-reverse', gap: 6, paddingHorizontal: spacing.md, paddingVertical: 9 },
+  actionText: { fontSize: typography.bodySmall, fontWeight: '700' },
+  audioStatus: { fontSize: typography.caption, marginTop: spacing.sm, textAlign: 'right' },
   sheetBody: { marginTop: spacing.md },
   sheetTafsirText: { fontSize: typography.body, lineHeight: 28, textAlign: 'right' },
-  readerNote: { alignItems: 'center', borderRadius: radii.sm, flexDirection: 'row-reverse', gap: spacing.sm, marginTop: spacing.lg, padding: spacing.md },
-  readerNoteText: { flex: 1, fontSize: typography.bodySmall, lineHeight: 21, textAlign: 'right' },
+  remoteAudioHint: { fontSize: typography.caption, fontWeight: '700' },
+  readerHint: { fontSize: typography.caption, marginTop: spacing.sm, textAlign: 'center' },
 });

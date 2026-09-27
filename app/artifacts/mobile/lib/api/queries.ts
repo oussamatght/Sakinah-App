@@ -15,6 +15,7 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import {
+  fetchAyahAudio,
   fetchQuranAudio,
   fetchQuranChapterPages,
   fetchQuranChapters,
@@ -28,6 +29,7 @@ import {
   fetchHadithCategories,
   fetchHadithDetail,
   fetchHadithList,
+  searchHadiths,
 } from "./hadith";
 import { fetchPrayerTimes } from "./prayer";
 import {
@@ -72,6 +74,8 @@ export const quranKeys = {
   surahs: ["quran", "surahs"] as const,
   surah: (id: number) => ["quran", "surah", id] as const,
   audio: (id: number) => ["quran", "audio", id] as const,
+  ayahAudio: (surahId: number, ayahNumber: number) =>
+    ["quran", "ayah-audio", surahId, ayahNumber] as const,
   tafsir: (surahId: number, ayah: number) =>
     ["quran", "tafsir", surahId, ayah] as const,
   juz: (juz: number) => ["quran", "juz", juz] as const,
@@ -125,6 +129,20 @@ export function useGetQuranAudio(
     queryKey: quranKeys.audio(surahId),
     queryFn: () => fetchQuranAudio(surahId),
     enabled,
+    staleTime: HALF_DAY,
+    gcTime: DAY,
+  });
+}
+
+/** صوت آية واحدة — يُجلب عند الضغط عليها فقط (بلا أي طلب مسبق). */
+export function useGetAyahAudio(
+  surahId: number,
+  ayahNumber: number | null,
+): UseQueryResult<QuranAudio, Error> {
+  return useQuery({
+    queryKey: quranKeys.ayahAudio(surahId, ayahNumber ?? 0),
+    queryFn: () => fetchAyahAudio(surahId, ayahNumber!),
+    enabled: Boolean(ayahNumber) && surahId >= 1 && surahId <= 114,
     staleTime: HALF_DAY,
     gcTime: DAY,
   });
@@ -306,6 +324,23 @@ export function useGetHadiths(
     queryKey: ["hadith", "category", categoryId, page, perPage],
     queryFn: () => fetchHadithList(categoryId, page, perPage),
     enabled,
+    staleTime: HOUR,
+    gcTime: DAY,
+  });
+}
+
+/**
+ * البحث النصي الموضوعي (hadeethenc) — مفتاح ["hadith","search",phrase] من
+ * العائلة الموثقة. null يعطل الاستعلام (لا طلبات أثناء الكتابة؛ يُفعّل عند
+ * submit فقط). النتائج بلا grade من المصدر — القاعدة محفوظة.
+ */
+export function useGetHadithSearch(
+  phrase: string | null,
+): UseQueryResult<HadithPage, Error> {
+  return useQuery({
+    queryKey: ["hadith", "search", phrase ?? ""],
+    queryFn: () => searchHadiths(phrase!, 1, 50),
+    enabled: Boolean(phrase && phrase.trim().length >= 2),
     staleTime: HOUR,
     gcTime: DAY,
   });

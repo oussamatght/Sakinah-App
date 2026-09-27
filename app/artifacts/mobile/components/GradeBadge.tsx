@@ -12,11 +12,20 @@ const GOOD = /^(صحيح|صحيح لغيره|متفق عليه|إسناده قو
 const FAIR = /^(حسن|حسن لغيره|حسن صحيح|قوي)/;
 const BAD = /^(ضعيف|ضعيف جدًا|موضوع|منكر|باطل|مدلس|لا يصح)/;
 
+// قيم مصدر الإثراء (fawazahmed0) تصل حرفيًا بالإنجليزية — التصنيف هنا
+// للتلوين فقط، النص المعروض يبقى حرفيًا بلا أي تعديل أو ترجمة.
+const GOOD_EN = /^(sahih|sahih lighairihi|sahih isnaad|hasan sahih|mutawatir|sahih mutawatir|agreed upon|sahih - agreed upon)/i;
+const FAIR_EN = /^(hasan|hasan lighairihi|hasan isnaad|isnaad hasan|isnaad sahih)/i;
+const BAD_EN = /^(daif|very daif|mau?du|munkar|shadh|mursal|la yastawee)/i;
+
 export function gradeTone(grade: string): 'good' | 'fair' | 'bad' | 'neutral' {
   const trimmed = grade.trim();
   if (GOOD.test(trimmed)) return 'good';
   if (FAIR.test(trimmed)) return 'fair';
   if (BAD.test(trimmed)) return 'bad';
+  if (GOOD_EN.test(trimmed)) return 'good';
+  if (FAIR_EN.test(trimmed)) return 'fair';
+  if (BAD_EN.test(trimmed)) return 'bad';
   return 'neutral';
 }
 

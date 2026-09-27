@@ -12,6 +12,7 @@ import {
 } from '@/components/ui';
 import { radii, spacing, typography } from '@/constants/tokens';
 import { useColors } from '@/hooks/useColors';
+import { useSettings } from '@/hooks/useAppState';
 
 /**
  * Juz reader — the real content of one juz (alquran.cloud /juz/{n}): a header
@@ -21,6 +22,10 @@ import { useColors } from '@/hooks/useColors';
 export default function JuzReader() {
   const colors = useColors();
   const router = useRouter();
+  // حجم الآيات ديناميكي من fontScale (المتجر المشترك — انظر quran-reader).
+  const { settings } = useSettings();
+  const verseFontSize = typography.quranMedium * settings.fontScale;
+  const verseLineHeight = Math.round(verseFontSize * 1.8);
   const { juz } = useLocalSearchParams<{ juz?: string }>();
   const juzNumber = Number(juz);
   const validJuz = Number.isInteger(juzNumber) && juzNumber >= 1 && juzNumber <= 30;
@@ -106,7 +111,13 @@ export default function JuzReader() {
         }
         renderItem={({ item }) => (
           <View style={[styles.verseRow, { borderBottomColor: colors.border }]}>
-            <Text style={[styles.verseText, { color: colors.foreground }]}>{item.text}</Text>
+            <Text
+              style={[
+                styles.verseText,
+                { color: colors.foreground, fontSize: verseFontSize, lineHeight: verseLineHeight },
+              ]}>
+              {item.text}
+            </Text>
             <View style={[styles.verseBadge, { backgroundColor: colors.secondary }]}>
               <Text style={[styles.verseBadgeText, { color: colors.primary }]}>{item.verseKey}</Text>
             </View>
@@ -128,7 +139,7 @@ const styles = StyleSheet.create({
   rangeName: { fontSize: typography.body, fontWeight: '700', textAlign: 'right' },
   rangeMeta: { flex: 1, fontSize: typography.caption, textAlign: 'left' },
   verseRow: { borderBottomWidth: 1, paddingVertical: spacing.md },
-  verseText: { fontSize: typography.quranMedium, lineHeight: 42, marginBottom: spacing.sm, textAlign: 'right' },
+  verseText: { marginBottom: spacing.sm, textAlign: 'right' },
   verseBadge: { alignSelf: 'flex-end', borderRadius: radii.pill, paddingHorizontal: 10, paddingVertical: 3 },
   verseBadgeText: { fontSize: typography.caption, fontWeight: '700' },
 });

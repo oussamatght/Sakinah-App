@@ -54,6 +54,16 @@ export type QuranJuz = {
   surahRanges: QuranJuzSurahRange[];
 };
 
+/**
+ * صفحة مصحف حقيقية: مجموعة آيات تشترك في نفس verse.page القادم من
+ * alquran.cloud (المصحف العثماني القياسي 604 صفحة) — أساس عرض "نص متصل
+ * بصفحات" في القارئ. تُبنى عبر groupQuranVersesByPage() في quran.ts.
+ */
+export type QuranPageGroup = {
+  page: number;
+  verses: QuranVerse[];
+};
+
 export type QuranAudio = {
   surahId: number;
   audioUrl: string;

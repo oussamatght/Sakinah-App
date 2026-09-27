@@ -17,6 +17,7 @@ import type {
   QuranChapterPage,
   QuranJuz,
   QuranJuzSurahRange,
+  QuranPageGroup,
   QuranSurah,
   QuranTafsir,
   QuranVerse,
@@ -28,6 +29,8 @@ const QURAN_COM_API = "https://api.quran.com/api/v4";
 /** Reciter 7 on api.quran.com = Mishary Rashid Alafasy (murattal). */
 const RECITER_ID = 7;
 const RECITER_NAME = "مشاري العفاسي";
+/** CDN for per-ayah files (مُتحقق حيًا: HTTP 206 مع Range requests). */
+const AYAH_AUDIO_CDN = "https://audio.qurancdn.com";
 
 /**
  * Matches the bismillah in ANY Uthmani-style rendering (tashkeel, dagger
@@ -283,6 +286,54 @@ export async function fetchQuranAudio(surahId: number): Promise<QuranAudio> {
     reciter: RECITER_NAME,
     format: String(audioFile.format ?? "mp3"),
   };
+}
+
+/**
+ * تقسيم آيات سورة إلى صفحات مصحف حقيقية (verse.page من alquran.cloud) —
+ * دالة نقية مُصدَّرة لتُختبر مباشرة (الكهف/الإخلاص/البقرة/التوبة) وتُستهلك
+ * من القارئ؛ أي آية بلا page صالح تُرمى بمكان مؤكد بدل صفحة وهمية 0.
+ */
+export function groupQuranVersesByPage(verses: QuranVerse[]): QuranPageGroup[] {
+  const groups = new Map<number, QuranPageGroup>();
+  for (const verse of verses) {
+    const page = verse.page;
+    if (!Number.isInteger(page) || page < 1) continue;
+    const group = groups.get(page);
+    if (group) {
+      group.verses.push(verse);
+    } else {
+      groups.set(page, { page, verses: [verse] });
+    }
+  }
+  return [...groups.values()].sort((a, b) => a.page - b.page);
+}
+
+/**
+ * صوت آية واحدة (نفس القارئ الافتراضي) — /recitations/{id}/by_ayah/{key}
+ * يعيد مسارًا نسبيًا مثل "Alafasy/mp3/002255.mp3" يُبنى فوق
+ * audio.qurancdn.com (مُتحقق حيًا 2026-09). المسارات المطلقة تُمرر كما هي.
+ */
+export async function fetchAyahAudio(
+  surahId: number,
+  ayahNumber: number,
+): Promise<QuranAudio> {
+  const verseKey = `${surahId}:${ayahNumber}`;
+  const payload = await fetchJson<{ audio_files?: unknown }>(
+    `${QURAN_COM_API}/recitations/${RECITER_ID}/by_ayah/${encodeURIComponent(verseKey)}`,
+    "صوت الآية",
+  );
+  const files = Array.isArray(payload.audio_files) ? payload.audio_files : [];
+  const first = files.find(isJsonRecord);
+  const path = first ? String(first.url ?? "") : "";
+  if (!path) {
+    const error = new Error("لا يوجد صوت لهذه الآية") as Error & { code?: string };
+    error.code = "AUDIO_NOT_FOUND";
+    throw error;
+  }
+  const audioUrl = /^https?:\/\//.test(path)
+    ? path
+    : `${AYAH_AUDIO_CDN}/${path.replace(/^\//, "")}`;
+  return { surahId, audioUrl, reciter: RECITER_NAME, format: "mp3" };
 }
 
 // ---------------------------------------------------------------------------

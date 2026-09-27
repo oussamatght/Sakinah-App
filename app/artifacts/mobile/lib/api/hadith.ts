@@ -10,7 +10,103 @@
  */
 
 import { fetchJson, intString, isJsonRecord, stringProp, type JsonRecord } from "./http";
+import { fetchMatchedGradeFromFawaz } from "./hadithGradeEnrichment";
+import hadithIndexJson from "../../assets/hadith-index/index.json";
 import type { HadithCategoryNode, HadithItem, HadithPage } from "./types";
+
+/**
+ * فهرس الأبواب المولّد مسبقًا (scripts/build-hadith-index.ts →
+ * assets/hadith-index/index.json): لكل كتاب أقسامه بأسمائها العربية
+ * التقليدية وقائمة أرقام الأحاديث الفعلية لكل قسم (مستخرجة من بيانات
+ * المصدر — لا من المدى المعلن المتداخل في بعض الكتب).
+ */
+export type HadithBookSection = {
+  section: number;
+  titleAr: string;
+  titleEn: string;
+  hadiths: number[];
+};
+
+const HADITH_INDEX = hadithIndexJson as unknown as {
+  generatedAt: string;
+  books: Record<string, HadithBookSection[]>;
+};
+
+/** فهرس أبواب كتاب واحد (خامس الكتب المدعومة فقط — بقي إجازة). */
+export function getHadithBookSections(bookSlug: string): HadithBookSection[] {
+  return HADITH_INDEX.books[bookSlug] ?? [];
+}
+
+/**
+ * أحاديث قسم واحد: تُجلب صفحات كاملة حتى تغطية كل أرقام القسم
+ * (استدعاءات متوازية محدودة بالصفحات المطلوبة) ثم تُرشّح حسب الأرقام
+ * الفعلية للقسم من الفهرس.
+ */
+export async function fetchHadithSection(
+  bookSlug: string,
+  sectionNumber: number,
+): Promise<HadithItem[]> {
+  const sections = getHadithBookSections(bookSlug);
+  const section = sections.find((entry) => entry.section === sectionNumber);
+  if (!section || section.hadiths.length === 0) return [];
+  const numbers = new Set(section.hadiths);
+  const last = Math.max(...section.hadiths);
+  const perPage = 50;
+  const lastPage = Math.ceil(last / perPage);
+  const pages = await Promise.all(
+    Array.from({ length: lastPage }, (_, index) =>
+      fetchBookHadithsRaw(bookSlug, index + 1, perPage).catch(() => []),
+    ),
+  );
+  const filtered = pages.flat().filter((item) => {
+    const number = Number.parseInt(item.reference, 10);
+    return Number.isInteger(number) && numbers.has(number);
+  });
+  // الإثراء (درجة fawaz العربية) بعد الترشيح — نفس المسار الإنتاجي للقوائم.
+  return enrichBookGrades(filtered, bookSlug);
+}
+
+/**
+ * حديث واحد برقمه داخل كتاب (hadis-api-id يدعم الجلب المباشر بالرقم —
+ * مُتحقق حيًا: /hadith/{book}/{number}). الإثراء مطبق نفسه، وفشل الجلب
+ * يرمي خطأً يتكفل فيه المستدعي (البحث بالرقم يعرض "لا يوجد").
+ */
+export async function fetchHadithByNumber(
+  bookSlug: string,
+  hadithNumber: number,
+): Promise<HadithItem> {
+  const books = await fetchHadithBooks();
+  const book = books.find((candidate) => candidate.slug === bookSlug);
+  const bookName = book?.nameAr ?? bookSlug;
+  const payload = await fetchJson<JsonRecord>(
+    `${HADIS_API}/hadith/${encodeURIComponent(bookSlug)}/${hadithNumber}`,
+    "كتب الحديث",
+    { timeoutMs: 20_000 },
+  );
+  // الإثراء غير متزامن — ننتظر نتيجة العنصر الواحد كاملة.
+  const enriched = await enrichBookGrades([mapHadisApiItem(payload, bookName)], bookSlug);
+  return enriched[0];
+}
+
+/** جلب خام (بلا إثراء) للاستخدام الداخلي في fetchHadithSection. */
+async function fetchBookHadithsRaw(
+  bookSlug: string,
+  page: number,
+  perPage: number,
+): Promise<HadithItem[]> {
+  const books = await fetchHadithBooks();
+  const book = books.find((candidate) => candidate.slug === bookSlug);
+  const bookName = book?.nameAr ?? bookSlug;
+  const safePerPage = Math.min(Math.max(perPage, 1), 50);
+  const safePage = Math.max(page, 1);
+  const payload = await fetchJson<{ items?: unknown }>(
+    `${HADIS_API}/hadith/${encodeURIComponent(bookSlug)}?page=${safePage}&limit=${safePerPage}`,
+    "كتب الحديث",
+    { timeoutMs: 20_000 },
+  );
+  const list = Array.isArray(payload.items) ? payload.items : [];
+  return list.filter(isJsonRecord).map((raw) => mapHadisApiItem(raw, bookName));
+}
 
 const HADEETH_ENC = "https://hadeethenc.com/api/v1";
 const HADIS_API = "https://hadis-api-id.vercel.app";
@@ -369,9 +465,10 @@ export async function fetchHadithBooks(): Promise<HadithBook[]> {
 /**
  * hadis-api-id item (Phase 7) — verified live fields: { number, arab, id }.
  * text = raw.arab exactly as returned (never modified).
- * grade: the API provides NO grading field — it stays undefined, and the UI
- * must NOT infer a grade from the book name ("صحيح البخاري" is book info,
- * not an authenticity verdict).
+ * grade: the API provides NO grading field — it stays undefined here. For the
+ * five books fawazahmed0 covers, an enrichment pass (below) attaches the
+ * literal grade afterwards; otherwise it stays undefined and the UI shows
+ * "درجة الحديث غير متوفرة" — never inferred from the book name.
  */
 function mapHadisApiItem(raw: JsonRecord, bookName: string): HadithItem {
   const number = intString(raw.number, 0) ?? 0;
@@ -382,6 +479,29 @@ function mapHadisApiItem(raw: JsonRecord, bookName: string): HadithItem {
     reference: String(number),
     apiSource: "hadis-api-id",
   };
+}
+
+/**
+ * الإثراء (fawazahmed0/hadith-api عبر jsDelivr): بعد جلب العناصر من
+ * hadis-api-id، نجلب الدرجة **الحرفية** للكتب الخمسة المدعومة فقط برقم
+ * الحديث نفسه، مع فحص تطابق نصي مقتضب ضد الترقيم المختلف بين الطبعات
+ * (رأس النصين ≥ 0.5 تشابه — بلا أي معالجة للحركات أو النص القرآني).
+ * الشكل المحلي والنصان لا يتغيران أبدًا؛ أي فشل/عدم تطابق = يبقى الحديث
+ * بلا درجة (GradeBadge showMissing). تفاصيل القواعد في hadithGradeEnrichment.ts.
+ */
+async function enrichBookGrades(items: HadithItem[], bookSlug: string): Promise<HadithItem[]> {
+  return Promise.all(
+    items.map(async (item) => {
+      const number = Number.parseInt(item.reference, 10);
+      if (!Number.isInteger(number) || number < 1) return item;
+      try {
+        const grade = await fetchMatchedGradeFromFawaz(bookSlug, number, item.text);
+        return grade ? { ...item, grade } : item;
+      } catch {
+        return item; // الإثراء لا يُعطّل القائمة أبدًا
+      }
+    }),
+  );
 }
 
 export async function fetchBookHadiths(
@@ -404,13 +524,16 @@ export async function fetchBookHadiths(
   const items = list
     .filter(isJsonRecord)
     .map((raw) => mapHadisApiItem(raw, bookName));
+  // الإثراء بعد التطبيع مباشرة — لا يمس النص/الكتاب/الرقم، يضيف grade حرفيًا
+  // إن وفره المصدر الإضافي، ويتركه undefined بخلاف ذلك.
+  const enriched = await enrichBookGrades(items, bookSlug);
 
   const pagination = isJsonRecord(payload.pagination) ? payload.pagination : {};
   const currentPage = intString(pagination.currentPage, safePage) ?? safePage;
   const totalPages = intString(pagination.totalPages) ?? 1;
   const total = intString(pagination.totalItems) ?? items.length;
   return {
-    items,
+    items: enriched,
     page: currentPage,
     perPage: safePerPage,
     total,

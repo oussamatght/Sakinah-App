@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { radii, spacing, typography } from '@/constants/tokens';
 import { useColors } from '@/hooks/useColors';
+import { useSettings } from '@/hooks/useAppState';
 
 type FeatherName = React.ComponentProps<typeof Feather>['name'];
 
@@ -248,13 +249,16 @@ export function ReadingCard({ onPress }: { onPress: () => void }) {
 
 export function DailyVerse() {
   const colors = useColors();
+  // حجم النص القرآني يتبع fontScale من المتجر المشترك (نفس quran-reader).
+  const { settings } = useSettings();
+  const verseFontSize = typography.quranMedium * settings.fontScale;
   return (
     <View style={[styles.dailyCard, { backgroundColor: colors.accent }]}>
       <View style={styles.dailyHeader}>
         <Text style={[styles.eyebrow, { color: colors.primary }]}>آية اليوم</Text>
         <Feather name="bookmark" size={17} color={colors.primary} />
       </View>
-      <Text style={[styles.verse, { color: colors.foreground }]}>
+      <Text style={[styles.verse, { color: colors.foreground, fontSize: verseFontSize, lineHeight: Math.round(verseFontSize * 1.8) }]}>
         افتح المصحف لقراءة آيات القرآن الكريم
       </Text>
       <Text style={[styles.verseSource, { color: colors.mutedForeground }]}>
@@ -479,7 +483,7 @@ const styles = StyleSheet.create({
   progressFill: { borderRadius: radii.pill, height: '100%' },
   dailyCard: { borderRadius: radii.md, padding: spacing.md },
   dailyHeader: { alignItems: 'center', flexDirection: 'row-reverse', justifyContent: 'space-between' },
-  verse: { fontSize: typography.quranMedium, lineHeight: 40, marginTop: spacing.md, textAlign: 'right' },
+  verse: { lineHeight: 40, marginTop: spacing.md, textAlign: 'right' },
   verseSource: { fontSize: typography.bodySmall, marginTop: spacing.sm, textAlign: 'right' },
   searchBar: {
     alignItems: 'center',
