@@ -13,7 +13,13 @@
  *   - prayer times                     : 1h
  */
 
-import { useQuery, type UseQueryResult } from "@tanstack/react-query";
+import { useEffect } from "react";
+import {
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 import {
   fetchAyahAudio,
   fetchQuranAudio,
@@ -26,18 +32,24 @@ import {
 import {
   fetchBookHadiths,
   fetchHadithBooks,
+  fetchHadithByNumber,
   fetchHadithCategories,
   fetchHadithDetail,
   fetchHadithList,
+  fetchHadithSection,
   searchHadiths,
 } from "./hadith";
+import { fetchMatchedGradeFromFawaz } from "./hadithGradeEnrichment";
 import { fetchPrayerTimes } from "./prayer";
 import {
   getLocalChapters,
   getLocalJuz,
   getLocalSurah,
+  getLocalSurahAudio,
   getLocalTafsir,
+  getQuranAudioLocalUri,
   isQuranDownloaded,
+  storeLocalSurahAudio,
   storeLocalTafsir,
 } from "../offline/quranDb";
 import { storeHadiths } from "../offline/hadithDb";
@@ -73,9 +85,11 @@ export type HadithsParams = { categoryId?: string; page?: number; perPage?: numb
 export const quranKeys = {
   surahs: ["quran", "surahs"] as const,
   surah: (id: number) => ["quran", "surah", id] as const,
-  audio: (id: number) => ["quran", "audio", id] as const,
-  ayahAudio: (surahId: number, ayahNumber: number) =>
-    ["quran", "ayah-audio", surahId, ayahNumber] as const,
+  // مفتاح الصوت يشمل القارئ: تغيير القارئ من الإعدادات = مفتاح جديد = إعادة جلب وعزف فعلي.
+  audio: (id: number, reciterId: number) =>
+    ["quran", "audio", id, reciterId] as const,
+  ayahAudio: (surahId: number, ayahNumber: number, reciterId: number) =>
+    ["quran", "ayah-audio", surahId, ayahNumber, reciterId] as const,
   tafsir: (surahId: number, ayah: number) =>
     ["quran", "tafsir", surahId, ayah] as const,
   juz: (juz: number) => ["quran", "juz", juz] as const,
@@ -121,13 +135,26 @@ export function useGetQuranReader(
 
 export function useGetQuranAudio(
   surahId: number,
+  reciterId: number,
   options?: { query?: { enabled?: boolean } },
 ): UseQueryResult<QuranAudio, Error> {
   const enabled =
     options?.query?.enabled ?? (surahId >= 1 && surahId <= 114);
   return useQuery({
-    queryKey: quranKeys.audio(surahId),
-    queryFn: () => fetchQuranAudio(surahId),
+    queryKey: quranKeys.audio(surahId, reciterId),
+    queryFn: async () => {
+      // محلي أولًا: سطر surah_audio إن وُجد، ويُفضَّل ملف mp3 الحقيقي عليه
+      // (تشغيل فعلًا بدون إنترنت). غير موجود → جلب ثم رقن كذاكرة مؤقتة.
+      const local = getLocalSurahAudio(surahId, reciterId);
+      if (local) {
+        const fileUri = getQuranAudioLocalUri(surahId, reciterId);
+        if (fileUri) return { ...local, audioUrl: fileUri, format: "file" };
+        return local;
+      }
+      const fetched = await fetchQuranAudio(surahId, reciterId);
+      storeLocalSurahAudio(surahId, reciterId, fetched);
+      return fetched;
+    },
     enabled,
     staleTime: HALF_DAY,
     gcTime: DAY,
@@ -138,10 +165,11 @@ export function useGetQuranAudio(
 export function useGetAyahAudio(
   surahId: number,
   ayahNumber: number | null,
+  reciterId: number,
 ): UseQueryResult<QuranAudio, Error> {
   return useQuery({
-    queryKey: quranKeys.ayahAudio(surahId, ayahNumber ?? 0),
-    queryFn: () => fetchAyahAudio(surahId, ayahNumber!),
+    queryKey: quranKeys.ayahAudio(surahId, ayahNumber ?? 0, reciterId),
+    queryFn: () => fetchAyahAudio(surahId, ayahNumber!, reciterId),
     enabled: Boolean(ayahNumber) && surahId >= 1 && surahId <= 114,
     staleTime: HALF_DAY,
     gcTime: DAY,
@@ -248,16 +276,56 @@ export function useGetPrayerTimes(
 // Hadith
 // ---------------------------------------------------------------------------
 
-// Phase 11: canonical query-key family for hadith:
+// Canonical query-key family for hadith:
 //   ["hadith", "categories"]
 //   ["hadith", "category", categoryId, page, perPage]
 //   ["hadith", "detail", hadithId]
 //   ["hadith", "search", phrase]
 //   ["hadith", "book", bookSlug, page, perPage]
+//   ["hadith", "book", bookSlug, "by-number", number]
+//   ["hadith", "book", bookSlug, "section", sectionNumber]
+//   ["hadith", "grade", "book", bookSlug, number]
+//   ["hadith", "grade", "hadeethenc", hadithId]
+// Every page is its own cache entry (per-page queryKeys) — a page change never
+// refetches another page, and `placeholderData: keepPreviousData` keeps the
+// previous page visible while the next one loads.
+export const hadithKeys = {
+  categories: ["hadith", "categories"] as const,
+  books: ["hadith", "books"] as const,
+  categoryPage: (categoryId: string, page: number, perPage: number) =>
+    ["hadith", "category", categoryId, page, perPage] as const,
+  detail: (hadithId: string) => ["hadith", "detail", hadithId] as const,
+  search: (phrase: string) => ["hadith", "search", phrase] as const,
+  bookPage: (bookSlug: string, page: number, perPage: number) =>
+    ["hadith", "book", bookSlug, page, perPage] as const,
+  byNumber: (bookSlug: string, number: number) =>
+    ["hadith", "book", bookSlug, "by-number", number] as const,
+  section: (bookSlug: string, sectionNumber: number) =>
+    ["hadith", "book", bookSlug, "section", sectionNumber] as const,
+  gradeBook: (bookSlug: string, number: number) =>
+    ["hadith", "grade", "book", bookSlug, number] as const,
+  gradeDetail: (hadithId: string) =>
+    ["hadith", "grade", "hadeethenc", hadithId] as const,
+} as const;
+
+/**
+ * التخزين offline لا يعرقل إرجاع الاستعلام — يُنفَّذ خارج مسار العرض
+ * (microtask) وفشله يُبتلع: التخزين المحلي اختياري.
+ */
+function persistHadiths(items: HadithItem[]): void {
+  queueMicrotask(() => {
+    try {
+      storeHadiths(items);
+    } catch {
+      // اختياري — لا يُسقط العرض.
+    }
+  });
+}
+
 // Categories are quasi-static → ETERNITY staleTime (no refetch per screen).
 export function useGetHadithCategories(): UseQueryResult<HadithCategoryNode[], Error> {
   return useQuery({
-    queryKey: ["hadith", "categories"],
+    queryKey: hadithKeys.categories,
     queryFn: fetchHadithCategories,
     staleTime: ETERNITY,
     gcTime: 2 * DAY,
@@ -270,7 +338,7 @@ export function useGetHadithCategories(): UseQueryResult<HadithCategoryNode[], E
  */
 export function useGetHadithBooks(): UseQueryResult<HadithBook[], Error> {
   return useQuery({
-    queryKey: ["hadith", "books"],
+    queryKey: hadithKeys.books,
     queryFn: fetchHadithBooks,
     staleTime: ETERNITY,
     gcTime: ETERNITY,
@@ -284,30 +352,20 @@ export function useGetBookHadiths(
   const page = params?.page ?? 1;
   const perPage = params?.perPage ?? 10;
   return useQuery({
-    queryKey: ["hadith", "book", bookSlug, page, perPage],
+    queryKey: hadithKeys.bookPage(bookSlug, page, perPage),
     // Accumulative offline cache: every fetched page is stored to SQLite so
     // previously-browsed hadiths stay readable offline (Task 7).
     queryFn: async () => {
       const result = await fetchBookHadiths(bookSlug, page, perPage);
-      storeHadiths(result.items);
+      persistHadiths(result.items);
       return result;
     },
     enabled: Boolean(params?.bookSlug),
+    // صفحة جديدة → تبقى البيانات السابقة ظاهرة حتى تصل الجديدة (لا شاشة
+    // تحميل كاملة عند كل تنقل) — الحالة: isPending=false، isFetching=true.
+    placeholderData: keepPreviousData,
     staleTime: HOUR,
     gcTime: DAY,
-  });
-}
-
-/**
- * Chapter → page-range map (from quran.com) powering the juz/page pickers in
- * the Quran tab. Immutable content → cached forever.
- */
-export function useGetQuranChapterPages(): UseQueryResult<QuranChapterPage[], Error> {
-  return useQuery({
-    queryKey: ["quran", "chapter-pages"],
-    queryFn: fetchQuranChapterPages,
-    staleTime: ETERNITY,
-    gcTime: ETERNITY,
   });
 }
 
@@ -320,25 +378,46 @@ export function useGetHadiths(
   const perPage = params?.perPage ?? 5;
   const enabled = options?.query?.enabled ?? true;
   return useQuery({
-    // Phase 11: ["hadith", "category", …] per the canonical key family.
-    queryKey: ["hadith", "category", categoryId, page, perPage],
+    queryKey: hadithKeys.categoryPage(categoryId, page, perPage),
     queryFn: () => fetchHadithList(categoryId, page, perPage),
     enabled,
+    placeholderData: keepPreviousData,
     staleTime: HOUR,
     gcTime: DAY,
   });
 }
 
 /**
+ * أحاديث قسم واحد (فهرس الأبواب) — تُجلب لمرة وتُخزن offline. الدرجات تُحمّل
+ * كسولًا في البطاقات (useHadithGrade) ولا تُحبس هنا.
+ */
+export function useGetHadithSection(
+  bookSlug: string | null,
+  sectionNumber: number | null,
+): UseQueryResult<HadithItem[], Error> {
+  return useQuery({
+    queryKey: hadithKeys.section(bookSlug ?? "", sectionNumber ?? 0),
+    queryFn: async () => {
+      const result = await fetchHadithSection(bookSlug!, sectionNumber!);
+      persistHadiths(result);
+      return result;
+    },
+    enabled: Boolean(bookSlug && sectionNumber && sectionNumber >= 1),
+    staleTime: DAY,
+    gcTime: 7 * DAY,
+  });
+}
+
+/**
  * البحث النصي الموضوعي (hadeethenc) — مفتاح ["hadith","search",phrase] من
  * العائلة الموثقة. null يعطل الاستعلام (لا طلبات أثناء الكتابة؛ يُفعّل عند
- * submit فقط). النتائج بلا grade من المصدر — القاعدة محفوظة.
+ * submit فقط). النتائج بلا grade من المصدر — القاعدة محفوظة (تُحمّل كسولًا).
  */
 export function useGetHadithSearch(
   phrase: string | null,
 ): UseQueryResult<HadithPage, Error> {
   return useQuery({
-    queryKey: ["hadith", "search", phrase ?? ""],
+    queryKey: hadithKeys.search(phrase ?? ""),
     queryFn: () => searchHadiths(phrase!, 1, 50),
     enabled: Boolean(phrase && phrase.trim().length >= 2),
     staleTime: HOUR,
@@ -357,11 +436,127 @@ export function useGetHadithDetail(
   hadithId: string | null,
 ): UseQueryResult<HadithItem, Error> {
   return useQuery({
-    queryKey: ["hadith", "detail", hadithId ?? ""],
+    queryKey: hadithKeys.detail(hadithId ?? ""),
     queryFn: () => fetchHadithDetail(hadithId!),
     enabled: Boolean(hadithId),
     staleTime: DAY,
     gcTime: 7 * DAY,
+  });
+}
+
+/**
+ * حديث كتاب واحد برقمه — نفس مسار الإنتاج الذي يبني بطاقات الكتب
+ * (hadis-api-id + إثراء fawaz الحرفي). تُستخدمه شاشة التفصيل لفتح حديث
+ * من كتاب: الدرجة/النص/المرجع مطابقة تمامًا لبطاقة القائمة — لا مصدر
+ * درجات ثانٍ.
+ */
+export function useGetHadithByNumber(
+  bookSlug: string | null,
+  number: number | null,
+): UseQueryResult<HadithItem, Error> {
+  return useQuery({
+    queryKey: hadithKeys.byNumber(bookSlug ?? "", number ?? 0),
+    queryFn: () => fetchHadithByNumber(bookSlug!, number!),
+    enabled: Boolean(bookSlug && number && number >= 1),
+    staleTime: DAY,
+    gcTime: 7 * DAY,
+  });
+}
+
+/**
+ * الدرجة كسولًا لعنصر قائمة (لا تُحبس القائمة نفسها):
+ *   - القديم من stock (fetcher مثرًى مثل by-number/التفصيل) يُعاد كما هو.
+ *   - HadeethEnc → نفس مصدر/حقل شاشة التفصيل (fetchHadithDetail).
+ *   - hadis-api-id → نفس القاعدة الحرفية (fawaz للكتب الخمسة؛ بخاري/مسلم بلا).
+ * البطاقات المرئية فقط (FlatList virtualization) تحرك طلبًا واحدًا لكل حديث،
+ * وتُحفظ النتيجة في كاش React Query (persisted) فالعودة فورية.
+ */
+export function useHadithGrade(
+  item: HadithItem | null | undefined,
+  bookSlug?: string | null,
+): string | undefined {
+  const immediate = item?.grade;
+  const kind = item?.apiSource;
+  const hadithId = item?.id;
+  const reference = Number.parseInt(item?.reference ?? "", 10);
+  const isBook =
+    kind === "hadis-api-id" &&
+    Boolean(bookSlug) &&
+    Number.isInteger(reference) &&
+    reference >= 1;
+  const isDetail = kind === "hadeethenc.com" && Boolean(hadithId);
+  const queryKey = isBook
+    ? hadithKeys.gradeBook(bookSlug!, reference)
+    : isDetail
+      ? hadithKeys.gradeDetail(hadithId!)
+      : (["hadith", "grade", "disabled"] as const);
+  const { data } = useQuery({
+    queryKey,
+    queryFn: async () => {
+      if (isBook && bookSlug && item) {
+        return fetchMatchedGradeFromFawaz(bookSlug, reference, item.text);
+      }
+      if (isDetail && hadithId) {
+        const detail = await fetchHadithDetail(hadithId);
+        return detail.grade;
+      }
+      return undefined;
+    },
+    enabled: !immediate && (isBook || isDetail),
+    staleTime: HOUR,
+    gcTime: 7 * DAY,
+  });
+  return immediate ?? data;
+}
+
+/**
+ * اجلب الصفحة التالية (واحدة فقط) في الخلفية — عند وصول المستخدم إليها
+ * تكون مخزنة وطازجة فيظهر العرض فورًا بلا spinner. مستخدمة في شاشات
+ * الأحاديث (كتب ومواضيع).
+ */
+export function usePrefetchNextHadithPage(params: {
+  enabled: boolean;
+  bookSlug?: string | null;
+  categoryId?: string | null;
+  page: number;
+  perPage: number;
+  hasMore: boolean;
+}): void {
+  const queryClient = useQueryClient();
+  const { enabled, bookSlug, categoryId, page, perPage, hasMore } = params;
+  useEffect(() => {
+    if (!enabled || !hasMore || page < 1) return;
+    const next = page + 1;
+    if (bookSlug) {
+      void queryClient.prefetchQuery({
+        queryKey: hadithKeys.bookPage(bookSlug, next, perPage),
+        queryFn: async () => {
+          const result = await fetchBookHadiths(bookSlug, next, perPage);
+          persistHadiths(result.items);
+          return result;
+        },
+        staleTime: HOUR,
+      });
+    } else if (categoryId) {
+      void queryClient.prefetchQuery({
+        queryKey: hadithKeys.categoryPage(categoryId, next, perPage),
+        queryFn: () => fetchHadithList(categoryId, next, perPage),
+        staleTime: HOUR,
+      });
+    }
+  }, [enabled, hasMore, page, perPage, bookSlug, categoryId, queryClient]);
+}
+
+/**
+ * Chapter → page-range map (from quran.com) powering the juz/page pickers in
+ * the Quran tab. Immutable content → cached forever.
+ */
+export function useGetQuranChapterPages(): UseQueryResult<QuranChapterPage[], Error> {
+  return useQuery({
+    queryKey: ["quran", "chapter-pages"],
+    queryFn: fetchQuranChapterPages,
+    staleTime: ETERNITY,
+    gcTime: ETERNITY,
   });
 }
 

@@ -1,62 +1,90 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import type { IslamicBook } from "../types/islamicBooksTypes";
+import { Feather } from "@expo/vector-icons";
+
+import { radii, spacing, typography } from "@/constants/tokens";
+import { useColors } from "@/hooks/useColors";
+import type { IslamicBook } from "@/lib/books/types";
 
 type Props = {
   book: IslamicBook;
   onPress: () => void;
 };
 
+function sourceLabel(source: IslamicBook["source"]): string {
+  return source === "turath" ? "تراث" : "إسلام هاوس";
+}
+
 export default function BookCard({ book, onPress }: Props) {
-  const isTurath = book.source === "turath";
+  const colors = useColors();
 
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`فتح ${book.title}`}
       onPress={onPress}
-      style={({ pressed }) => [styles.card, pressed && styles.pressed]}
-    >
-      <View style={styles.iconBox}>
-        <Ionicons
-          name="book-outline"
-          size={26}
-          color={isTurath ? "#6D4C41" : "#1565C0"}
-        />
+      style={({ pressed }) => [
+        styles.card,
+        {
+          backgroundColor: colors.card,
+          borderColor: colors.border,
+          opacity: pressed ? 0.7 : 1,
+        },
+      ]}>
+      <View style={[styles.iconBox, { backgroundColor: colors.secondary }]}>
+        {book.coverUrl ? (
+          <Feather name="image" size={20} color={colors.primary} />
+        ) : (
+          <Feather name="book-open" size={20} color={colors.primary} />
+        )}
       </View>
 
       <View style={styles.content}>
-        <Text style={styles.title} numberOfLines={2}>
+        <Text
+          numberOfLines={2}
+          style={[
+            styles.title,
+            { color: colors.foreground },
+          ]}>
           {book.title}
         </Text>
 
-        {!!book.author && (
+        {book.author ? (
           <View style={styles.row}>
-            <Ionicons name="person-outline" size={14} color="#777" />
-            <Text style={styles.author} numberOfLines={1}>
+            <Feather name="user" size={13} color={colors.mutedForeground} />
+            <Text
+              numberOfLines={1}
+              style={[styles.author, { color: colors.mutedForeground }]}>
               {book.author}
             </Text>
           </View>
-        )}
+        ) : null}
 
-        {!!book.category && (
-          <Text style={styles.category} numberOfLines={1}>
-            {book.category}
+        {book.description ? (
+          <Text
+            numberOfLines={2}
+            style={[styles.description, { color: colors.mutedForeground }]}>
+            {book.description}
           </Text>
-        )}
+        ) : null}
 
         <View style={styles.footer}>
           <View
             style={[
               styles.badge,
-              isTurath ? styles.turathBadge : styles.islamHouseBadge,
-            ]}
-          >
-            <Text style={styles.badgeText}>
-              {isTurath ? "تراث" : "إسلام هاوس"}
+              {
+                backgroundColor:
+                  book.source === "turath"
+                    ? colors.accent
+                    : colors.secondary,
+              },
+            ]}>
+            <Text style={[styles.badgeText, { color: colors.primary }]}>
+              {sourceLabel(book.source)}
             </Text>
           </View>
 
-          <Ionicons name="chevron-back" size={18} color="#999" />
+          <Feather name="chevron-left" size={18} color={colors.mutedForeground} />
         </View>
       </View>
     </Pressable>
@@ -65,81 +93,70 @@ export default function BookCard({ book, onPress }: Props) {
 
 const styles = StyleSheet.create({
   card: {
-    flexDirection: "row",
-    backgroundColor: "#FFFFFF",
-    borderRadius: 18,
-    padding: 14,
-    marginBottom: 12,
+    alignItems: "center",
+    borderRadius: radii.md,
     borderWidth: 1,
-    borderColor: "#ECECEC",
-    shadowColor: "#000",
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 1,
+    flexDirection: "row-reverse",
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+    padding: spacing.md,
   },
   pressed: {
     opacity: 0.75,
     transform: [{ scale: 0.99 }],
   },
   iconBox: {
-    width: 52,
-    height: 52,
-    borderRadius: 15,
-    backgroundColor: "#F7F4F1",
     alignItems: "center",
+    borderRadius: radii.sm,
+    height: 52,
     justifyContent: "center",
-    marginRight: 12,
+    width: 52,
   },
   content: {
+    alignItems: "flex-end",
     flex: 1,
     minWidth: 0,
   },
   title: {
-    fontSize: 16,
+    fontSize: typography.body,
     fontWeight: "700",
-    color: "#202124",
-    textAlign: "right",
     lineHeight: 23,
+    textAlign: "right",
+    width: "100%",
   },
   row: {
-    flexDirection: "row-reverse",
     alignItems: "center",
+    flexDirection: "row-reverse",
     gap: 5,
     marginTop: 5,
+    width: "100%",
   },
   author: {
     flex: 1,
-    color: "#6D6D6D",
-    fontSize: 13,
+    fontSize: typography.caption,
     textAlign: "right",
   },
-  category: {
-    color: "#888",
-    fontSize: 12,
-    marginTop: 4,
+  description: {
+    fontSize: typography.caption,
+    lineHeight: 18,
+    marginTop: 5,
     textAlign: "right",
+    width: "100%",
   },
   footer: {
-    flexDirection: "row",
     alignItems: "center",
+    flexDirection: "row-reverse",
     justifyContent: "space-between",
     marginTop: 9,
+    width: "100%",
   },
   badge: {
-    borderRadius: 999,
+    borderRadius: radii.pill,
     paddingHorizontal: 9,
     paddingVertical: 4,
   },
-  turathBadge: {
-    backgroundColor: "#F1E7E1",
-  },
-  islamHouseBadge: {
-    backgroundColor: "#E7F0FA",
-  },
   badgeText: {
-    fontSize: 11,
+    fontSize: typography.caption,
     fontWeight: "700",
-    color: "#555",
   },
 });

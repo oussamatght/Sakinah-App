@@ -22,10 +22,44 @@ export function stringProp(value: unknown): string | undefined {
 }
 
 /**
+ * In-flight dedupe for identical concurrent GETs. Multiple consumers (list +
+ * detail + prefetch) can request the same URL in the same tick; this merges
+ * them into one network call. Session-only: entries are removed as soon as the
+ * shared promise settles, so nothing is cached beyond an in-flight request.
+ */
+const inflightFetches = new Map<string, Promise<unknown>>();
+
+/**
  * JSON fetch with timeout + UpstreamError mapping. All providers below send
  * `access-control-allow-origin: *`, so this works from native fetch and web.
  */
 export async function fetchJson<T>(
+  url: string,
+  source: string,
+  options: { timeoutMs?: number } = {},
+): Promise<T> {
+  const key = `${options.timeoutMs ?? 15_000}|${url}`;
+  const existing = inflightFetches.get(key);
+  if (existing) return existing as Promise<T>;
+
+  const job = fetchJsonOnce<T>(url, source, options);
+  inflightFetches.set(
+    key,
+    job.then(
+      (value) => {
+        inflightFetches.delete(key);
+        return value;
+      },
+      (error: unknown) => {
+        inflightFetches.delete(key);
+        throw error;
+      },
+    ),
+  );
+  return job;
+}
+
+async function fetchJsonOnce<T>(
   url: string,
   source: string,
   options: { timeoutMs?: number } = {},

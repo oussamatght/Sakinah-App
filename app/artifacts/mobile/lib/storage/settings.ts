@@ -18,7 +18,18 @@ export const DEFAULT_SETTINGS: AppSettings = {
   prayerNotifications: false,
 };
 
-export const FONT_SCALES = [0.85, 1, 1.25, 1.5] as const;
+/** ثوابت حجم خط المصحف — تصاعدية حول المتوسط (1). 0.7 تتيح حجمًا أصغر فعلًا. */
+export const FONT_SCALES = [0.7, 0.85, 1, 1.15, 1.3, 1.5] as const;
+
+/** تسميات عربية لكل مقاس — مشتركة بين شاشة الإعدادات وشريط أدوات القارئ. */
+export const FONT_SCALE_LABELS: Record<number, string> = {
+  0.7: 'أصغر',
+  0.85: 'صغير',
+  1: 'متوسط',
+  1.15: 'كبير',
+  1.3: 'أكبر',
+  1.5: 'الأكبر',
+};
 
 export const RECITERS = [
   { id: 7, nameAr: "مشاري العفاسي" },

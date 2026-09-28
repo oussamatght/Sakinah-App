@@ -38,9 +38,10 @@ export function getHadithBookSections(bookSlug: string): HadithBookSection[] {
 }
 
 /**
- * أحاديث قسم واحد: تُجلب صفحات كاملة حتى تغطية كل أرقام القسم
- * (استدعاءات متوازية محدودة بالصفحات المطلوبة) ثم تُرشّح حسب الأرقام
- * الفعلية للقسم من الفهرس.
+ * أحاديث قسم واحد: تُجلب **الصفحات الفعلية** التي تحتوي أرقام هذا القسم فقط
+ * (كل رقم → صفحته ceil(رقم/50)، ثم الصفحات المميزة — عادة بضع صفحات لا
+ * المئات)، ثم تُرشّح بترتيب الفهرس. الدرجات لا تُثرّى هنا (N طلبات fawaz
+ * محبوسة) — تُحمّل كسولًا في البطاقات عبر useHadithGrade.
  */
 export async function fetchHadithSection(
   bookSlug: string,
@@ -50,20 +51,25 @@ export async function fetchHadithSection(
   const section = sections.find((entry) => entry.section === sectionNumber);
   if (!section || section.hadiths.length === 0) return [];
   const numbers = new Set(section.hadiths);
-  const last = Math.max(...section.hadiths);
-  const perPage = 50;
-  const lastPage = Math.ceil(last / perPage);
+  // الصفحات التي تحتوي أرقام الباب فقط — لا كل صفحات الكتاب (كانت تُجلب
+  // حتى آخر رقم بأعداد ضخمة من الطلبات المتوازية).
+  const pagesNeeded = [
+    ...new Set(section.hadiths.map((number) => Math.ceil(number / 50))),
+  ];
   const pages = await Promise.all(
-    Array.from({ length: lastPage }, (_, index) =>
-      fetchBookHadithsRaw(bookSlug, index + 1, perPage).catch(() => []),
-    ),
+    pagesNeeded.map((page) => fetchBookHadithsRaw(bookSlug, page, 50).catch(() => [])),
   );
-  const filtered = pages.flat().filter((item) => {
-    const number = Number.parseInt(item.reference, 10);
-    return Number.isInteger(number) && numbers.has(number);
-  });
-  // الإثراء (درجة fawaz العربية) بعد الترشيح — نفس المسار الإنتاجي للقوائم.
-  return enrichBookGrades(filtered, bookSlug);
+  return pages
+    .flat()
+    .filter((item) => {
+      const number = Number.parseInt(item.reference, 10);
+      return Number.isInteger(number) && numbers.has(number);
+    })
+    .sort((a, b) => {
+      const na = Number.parseInt(a.reference, 10);
+      const nb = Number.parseInt(b.reference, 10);
+      return na - nb;
+    });
 }
 
 /**
@@ -297,6 +303,9 @@ export async function fetchHadithList(
   // "book" for thematic hadiths = the category's own title (Phase 8: cached —
   // was re-fetching the whole categories tree on every pagination request).
   const categoryTitle = await categoryTitleFor(categoryId);
+  // الدرجات لا تُجلب هنا (N× fetchHadithDetail تُحبس الصفحة أمام مصدر بطيء)
+  // — تُحمّل كسولًا للبطاقات المرئية فقط عبر useHadithGrade/ItemGrade بنفس
+  // المصدر/الحقل/التطبيع، محفوظةً في كاش React Query بعد أول مرة.
   const items = data
     .filter(isJsonRecord)
     .map((raw) => normalizeListItem(raw, categoryTitle))
@@ -387,8 +396,12 @@ export async function fetchHadithDetail(hadithId: string): Promise<HadithItem> {
  * → نتائج فارغة دائمًا (خطأ فعلي في الإنتاج).
  * كذلك تحققت حيًا أن page/per_page يُهملهما الخادم (صفحة 1 و2 أعادت نفس
  * الـ26 عنصرًا) — فلا pagination حقيقي هنا: hasMore=false هو السلوك الأصح
- * الموثق، ولا نخترع metadata غير موجودة. عناصر البحث بلا grade — تحترم
- * القاعدة: لا اختراع حكم.
+ * الموثق، ولا نخترع metadata غير موجودة.
+ *
+ * الدرجات لا تُجلب هنا — كان البحث يثرّي كل النتائج (حتى 50) بنداءات تفصيل
+ * بطيئة قبل عرض أي شيء. الآن تُحمّل كسولًا للبطاقات المرئية عبر
+ * useHadithGrade/ItemGrade بنفس مصدر شاشة التفصيل — فلا يختلف الحكم أبدًا،
+ * والفشل يُبقي بلا درجة (لا اختراع).
  */
 export async function searchHadiths(
   phrase: string,
@@ -442,7 +455,30 @@ export type HadithBook = {
   total: number;
 };
 
+/** قائمة الكتب تسعة قديمة بلا تغيير — تُحل مرة واحدة وتُشارك بالجلسة
+ *  (مثل كاش التصنيفات). كان كل جلب صفحة/حديث يستدعيها شبكيًا من جديد
+ *  (طلب /hadith مكرر)، إلى جانب كاش React Query للمستهلكات. */
+let booksInFlight: Promise<HadithBook[]> | null = null;
+let booksCached: HadithBook[] | null = null;
+
 export async function fetchHadithBooks(): Promise<HadithBook[]> {
+  if (booksCached) return booksCached;
+  if (!booksInFlight) {
+    booksInFlight = fetchHadithBooksFromApi()
+      .then((books) => {
+        booksCached = books;
+        return books;
+      })
+      .catch((error: unknown) => {
+        // اسمح بإعادة المحاولة لاحقًا إن فشل الجلب الأول.
+        booksInFlight = null;
+        throw error;
+      });
+  }
+  return booksInFlight;
+}
+
+async function fetchHadithBooksFromApi(): Promise<HadithBook[]> {
   const payload = await fetchJson<unknown>(
     `${HADIS_API}/hadith`,
     "كتب الحديث",
@@ -489,6 +525,14 @@ function mapHadisApiItem(raw: JsonRecord, bookName: string): HadithItem {
  * الشكل المحلي والنصان لا يتغيران أبدًا؛ أي فشل/عدم تطابق = يبقى الحديث
  * بلا درجة (GradeBadge showMissing). تفاصيل القواعد في hadithGradeEnrichment.ts.
  */
+/**
+ * تُستخدم الآن في المسار الأحادي فقط (fetchHadithByNumber): عنصر واحد،
+ * طلب واحد من fawaz عبر jsDelivr. القوائم/الصفحات/الأبواب تبقي عناصرها
+ * خام من hadis-api-id (لا N× طلبات تُحبس الجلب) — الدرجات تُحمّل كسولًا
+ * للمرئي فقط عبر useHadithGrade/ItemGrade بنفس القاعدة الحرفية
+ * (الكتب الخمسة أعلاه، بخاري/مسلم بلا درجة، أي فشل يُبقي بلا درجة).
+ * نص/كتاب/رقم العنصر لا يُمس إطلاقًا.
+ */
 async function enrichBookGrades(items: HadithItem[], bookSlug: string): Promise<HadithItem[]> {
   return Promise.all(
     items.map(async (item) => {
@@ -521,19 +565,17 @@ export async function fetchBookHadiths(
     { timeoutMs: 20_000 },
   );
   const list = Array.isArray(payload.items) ? payload.items : [];
+  // خام — الدرجات تُحمّل كسولًا في البطاقات (useHadithGrade) وليس هنا.
   const items = list
     .filter(isJsonRecord)
     .map((raw) => mapHadisApiItem(raw, bookName));
-  // الإثراء بعد التطبيع مباشرة — لا يمس النص/الكتاب/الرقم، يضيف grade حرفيًا
-  // إن وفره المصدر الإضافي، ويتركه undefined بخلاف ذلك.
-  const enriched = await enrichBookGrades(items, bookSlug);
 
   const pagination = isJsonRecord(payload.pagination) ? payload.pagination : {};
   const currentPage = intString(pagination.currentPage, safePage) ?? safePage;
   const totalPages = intString(pagination.totalPages) ?? 1;
   const total = intString(pagination.totalItems) ?? items.length;
   return {
-    items: enriched,
+    items,
     page: currentPage,
     perPage: safePerPage,
     total,

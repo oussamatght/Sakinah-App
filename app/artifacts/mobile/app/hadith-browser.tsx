@@ -3,18 +3,17 @@ import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-na
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import {
-  fetchHadithSection,
   getHadithBookSections,
   useGetBookHadiths,
   useGetHadithBooks,
   useGetHadithCategories,
   useGetHadithSearch,
+  useGetHadithSection,
   useGetHadiths,
+  usePrefetchNextHadithPage,
   type HadithBookSection,
-  type HadithItem,
 } from "@/lib/api";
 import {
-  AppHeader,
   ErrorState,
   IconButton,
   isOfflineError,
@@ -22,14 +21,14 @@ import {
   Screen,
 } from "@/components/ui";
 import { FavoriteButton } from "@/components/FavoriteButton";
-import { GradeBadge } from "@/components/GradeBadge";
+import { ItemGrade } from "@/components/GradeBadge";
 import { radii, spacing, typography } from "@/constants/tokens";
 import { useColors } from "@/hooks/useColors";
 
 /** Entry mode: canonical books or thematic categories (hadeethenc). */
 type Mode = "books" | "topics";
 
-/** أحاديث باب واحد — جلب واحد بدرجاته المُثراة، مع إعادة المحاولة. */
+/** أحاديث باب واحد — عبر useGetHadithSection (مخزَّن، مع إعادة محاولة). */
 function SectionHadiths({
   bookSlug,
   sectionNumber,
@@ -43,38 +42,23 @@ function SectionHadiths({
 }) {
   const colors = useColors();
   const router = useRouter();
-  const [items, setItems] = useState<HadithItem[] | null>(null);
-  const [error, setError] = useState(false);
+  const query = useGetHadithSection(bookSlug, sectionNumber);
+  const items = query.data ?? null;
 
-  const load = React.useCallback(() => {
-    let active = true;
-    setItems(null);
-    setError(false);
-    fetchHadithSection(bookSlug, sectionNumber)
-      .then((fetched) => {
-        if (active) setItems(fetched);
-      })
-      .catch(() => {
-        if (active) setError(true);
-      });
-    return () => {
-      active = false;
-    };
-  }, [bookSlug, sectionNumber]);
-
-  React.useEffect(() => load(), [load]);
-
-  if (error) {
+  if (query.isError) {
     return (
       <ErrorState
-        offline={false}
+        offline={isOfflineError(query.error)}
         onRetry={() => {
-          load();
+          void query.refetch();
         }}
       />
     );
   }
-  if (items === null) return <LoadingState />;
+  if (items === null) {
+    if (query.isPending) return <LoadingState />;
+    return null;
+  }
   if (items.length === 0) {
     return (
       <Text style={[styles.searchScope, { color: colors.mutedForeground }]}>
@@ -104,7 +88,14 @@ function SectionHadiths({
         </Pressable>
       }
       renderItem={({ item }) => (
-        <View
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="فتح تفصيل الحديث"
+          onPress={() =>
+            router.push(
+              `/hadith-detail?book=${encodeURIComponent(bookSlug)}&number=${encodeURIComponent(item.reference)}`,
+            )
+          }
           style={[
             styles.hadithCard,
             { backgroundColor: colors.card, borderColor: colors.border },
@@ -124,7 +115,7 @@ function SectionHadiths({
             />
           </View>
           <View style={styles.hadithMetaRow}>
-            <GradeBadge grade={item.grade} showMissing />
+            <ItemGrade item={item} bookSlug={bookSlug} showMissing />
             {item.attribution ? (
               <Text
                 style={[
@@ -134,6 +125,9 @@ function SectionHadiths({
                 الراوي: {item.attribution}
               </Text>
             ) : null}
+            <Text style={[styles.detailHint, { color: colors.primary }]}>
+              اضغط على الحديث للتفاصيل والشرح
+            </Text>
           </View>
           <View style={styles.hadithFooter}>
             <Feather name="bookmark" size={14} color={colors.primary} />
@@ -144,7 +138,7 @@ function SectionHadiths({
               {item.reference ? ` — رقم الحديث ${item.reference}` : ""}
             </Text>
           </View>
-        </View>
+        </Pressable>
       )}
     />
   );
@@ -197,6 +191,20 @@ export default function HadithBrowser() {
   const sections = selectedBook ? getHadithBookSections(selectedBook) : [];
   const categories = categoriesQuery.data ?? [];
   const activeList = mode === "books" ? listQuery : topicQuery;
+
+  // اجلب الصفحة التالية وحدها في الخلفية — «التالى» يُجيب فورًا بعدها.
+  usePrefetchNextHadithPage({
+    enabled:
+      Boolean(selectedBook || selectedCategory) &&
+      !openSection &&
+      !indexVisible &&
+      submittedSearch.trim().length === 0,
+    bookSlug: mode === "books" ? selectedBook : null,
+    categoryId: mode === "topics" ? selectedCategory : null,
+    page,
+    perPage: 10,
+    hasMore: activeList.data?.hasMore ?? false,
+  });
 
   const backToList = () => {
     setSelectedBook(null);
@@ -531,7 +539,7 @@ export default function HadithBrowser() {
                 />
               </View>
               <View style={styles.hadithMetaRow}>
-                <GradeBadge grade={item.grade} showMissing />
+                <ItemGrade item={item} bookSlug={selectedBook} showMissing />
                 {item.attribution ? (
                   <Text
                     style={[
@@ -542,7 +550,7 @@ export default function HadithBrowser() {
                   </Text>
                 ) : null}
                 <Text style={[styles.detailHint, { color: colors.primary }]}>
-                  التفاصيل والشرح ←
+                  اضغط على الحديث للتفاصيل والشرح
                 </Text>
               </View>
             </Pressable>
@@ -625,17 +633,23 @@ export default function HadithBrowser() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="فتح تفصيل الحديث"
-              // HadeethEnc فقط: تفصيله هو المصدر الوحيد للدرجة الحرفية —
-              // بطاقات hadis-api-id (الكتب) لا تفتح تفصيلًا غير موجود.
+              // كل البطاقات تفتح التفصيل: HadeethEnc بمعرّفه، وأحاديث الكتب
+              // (hadis-api-id) بكتابها ورقمها — نفس مسار إنتاج القائمة،
+              // فيُعرض في التفصيل النص والدرجة الحرفية نفسها.
               onPress={
                 item.apiSource === "hadeethenc.com"
                   ? () =>
                     router.push(
                       `/hadith-detail?hadithId=${encodeURIComponent(item.id)}`,
                     )
-                  : undefined
+                  : selectedBook
+                    ? () =>
+                      router.push(
+                        `/hadith-detail?book=${encodeURIComponent(selectedBook)}&number=${encodeURIComponent(item.reference)}`,
+                      )
+                    : undefined
               }
-              disabled={item.apiSource !== "hadeethenc.com"}
+              disabled={!item.apiSource || (item.apiSource !== "hadeethenc.com" && !selectedBook)}
               style={[
                 styles.hadithCard,
                 { backgroundColor: colors.card, borderColor: colors.border },
@@ -655,17 +669,17 @@ export default function HadithBrowser() {
                 />
               </View>
               <View style={styles.hadithMetaRow}>
-                {/* الدرجة: حرفية من المصدر (الإثراء العربي للكتب الخمسة) —
-                    "غير متوفرة" تعني أن المصدر لا يقدم درجة لهذا الحديث.
-                    hadeethenc فقط له تفصيل — دعوة الضغط تفتحه. */}
-                <GradeBadge grade={item.grade} showMissing />
-                {item.apiSource === "hadeethenc.com" ? (
+                {/* الدرجة كسولًا (ItemGrade): حرفية من المصدر للكتب الخمسة —
+                    "غير متوفرة" تعني أن المصدر لا يقدم درجة لهذا الحديث ولا
+                    نخترعها. hadeethenc فقط له تفصيل — دعوة الضغط تفتحه. */}
+                <ItemGrade item={item} bookSlug={selectedBook} showMissing />
+                {item.apiSource === "hadeethenc.com" || selectedBook ? (
                   <Text
                     style={[
                       styles.detailHint,
                       { color: colors.primary },
                     ]}>
-                    التفاصيل والدرجة ←
+                    اضغط على الحديث للتفاصيل والشرح
                   </Text>
                 ) : null}
                 {item.attribution ? (

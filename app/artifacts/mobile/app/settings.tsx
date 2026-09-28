@@ -7,7 +7,7 @@ import { radii, spacing, typography } from '@/constants/tokens';
 import { useColors } from '@/hooks/useColors';
 import { useSettings } from '@/hooks/useAppState';
 import { setThemePreference } from '@/hooks/useTheme';
-import { FONT_SCALES, RECITERS, getPrayerTimesCache, type ThemePreference } from '@/lib/storage';
+import { FONT_SCALES, FONT_SCALE_LABELS, RECITERS, getPrayerTimesCache, type ThemePreference } from '@/lib/storage';
 import {
   cancelAdhanNotifications,
   isExpoGo,
@@ -32,12 +32,7 @@ const THEME_OPTIONS: Array<{ key: ThemePreference; label: string }> = [
   { key: 'system', label: 'تلقائي' },
 ];
 
-const FONT_LABELS: Record<number, string> = {
-  0.85: 'صغير',
-  1: 'متوسط',
-  1.25: 'كبير',
-  1.5: 'أكبر',
-};
+const FONT_LABELS = FONT_SCALE_LABELS;
 
 export default function SettingsScreen() {
   const colors = useColors();

@@ -29,9 +29,32 @@ const QURAN_COM_API = "https://api.quran.com/api/v4";
 // إعادة تصدير لمستهلكي مسار الصفحات (القارئ والاختبارات).
 export type { QuranPageGroup, QuranSurah } from "./types";
 
-/** Reciter 7 on api.quran.com = Mishary Rashid Alafasy (murattal). */
-const RECITER_ID = 7;
-const RECITER_NAME = "مشاري العفاسي";
+/**
+ * القارئ الافتراضي في api.quran.com (7 = مشاري راشد العفاسي).
+ * أرقام القراء ومراجعهم: recitations في api.quran.com/api/v4/recitations
+ * (1 عبد الباسط مجود، 2 الشاطري، 3 أحمد العجمي، 4 الحصري، 5 ماهر المعيقلي،
+ * 6 منصور السالمي، 7 مشاري العفاسي، 8 محمد أيوب). القيم متطابقة مع
+ * RECITERS في إعدادات التطبيق ليُمرَّر الرقم المختار لكل طلب صوت.
+ */
+export const DEFAULT_RECITER_ID = 7;
+
+/** أسماء القراء لقيمة reciter في واجهة الصوت (عرض وفهرس محلي فقط). */
+export const RECITER_NAMES: Record<number, string> = {
+  1: "عبد الباسط عبد الصمد (مجود)",
+  2: "أبو بكر الشاطري",
+  3: "أحمد العجمي",
+  4: "الحصري",
+  5: "ماهر المعيقلي",
+  6: "منصور السالمي",
+  7: "مشاري العفاسي",
+  8: "محمد أيوب",
+};
+
+/** اسم القارئ للعرض؛ أي رقم غير معروف يعود إلى الافتراضي. */
+export function reciterNameOf(reciterId: number): string {
+  return RECITER_NAMES[reciterId] ?? RECITER_NAMES[DEFAULT_RECITER_ID];
+}
+
 /** CDN for per-ayah files (مُتحقق حيًا: HTTP 206 مع Range requests). */
 const AYAH_AUDIO_CDN = "https://audio.qurancdn.com";
 
@@ -198,7 +221,13 @@ export async function fetchQuranSurah(surahId: number): Promise<QuranSurah> {
     error.code = "SURAH_NOT_FOUND";
     throw error;
   }
-  return { ...chapter, verses };
+  // تحقق من اكتمال السورة: سجّل التحذيرات (إن وُجدت) ثم سلِّم الآيات مرتبة
+  // وخالية من التكرار — بلا سكوت عن النواقص كي لا تختفي آية بلا أثر.
+  const validation = validateQuranSurah({ ...chapter, verses });
+  if (validation.issues.length > 0) {
+    console.warn(`[القرآن] ${validation.issues.join(" | ")}`);
+  }
+  return { ...chapter, verses: validation.sortedVerses };
 }
 
 /**
@@ -268,12 +297,15 @@ export async function fetchQuranJuz(juz: number): Promise<QuranJuz> {
 }
 
 // ---------------------------------------------------------------------------
-// Chapter audio (reciter 7 = Mishary Alafasy)
+// Chapter audio — whole-surah file for the selected reciter (default 7)
 // ---------------------------------------------------------------------------
 
-export async function fetchQuranAudio(surahId: number): Promise<QuranAudio> {
+export async function fetchQuranAudio(
+  surahId: number,
+  reciterId: number = DEFAULT_RECITER_ID,
+): Promise<QuranAudio> {
   const payload = await fetchJson<{ audio_file?: unknown }>(
-    `${QURAN_COM_API}/chapter_recitations/${RECITER_ID}/${surahId}`,
+    `${QURAN_COM_API}/chapter_recitations/${reciterId}/${surahId}`,
     "صوت القرآن",
   );
   const audioFile = isJsonRecord(payload.audio_file) ? payload.audio_file : {};
@@ -286,7 +318,7 @@ export async function fetchQuranAudio(surahId: number): Promise<QuranAudio> {
   return {
     surahId,
     audioUrl,
-    reciter: RECITER_NAME,
+    reciter: reciterNameOf(reciterId),
     format: String(audioFile.format ?? "mp3"),
   };
 }
@@ -360,6 +392,121 @@ export function prevAyahPosition(pos: AyahPosition): AyahPosition | null {
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// التحقق من اكتمال السورة (فرز / إزالة تكرار / عدّ + تحذيرات)
+// ---------------------------------------------------------------------------
+
+export type QuranSurahValidation = {
+  surahId: number;
+  /** العدد القانوني الثابت من SURAH_AYAH_COUNTS. */
+  canonicalCount: number;
+  /** عدد الآيات كما استُلمت من المصدر. */
+  receivedCount: number;
+  /** عدد الآيات الصالحة بعد الفرز (فريدة، داخل النطاق). */
+  uniqueCount: number;
+  /** هل الآيات الناتجة مطابقة تمامًا للترتيب 1..count بلا قفز ولا تكرار؟ */
+  orderIsCanonical: boolean;
+  /** أرقام آيات تكرّرت أكثر من مرة (تُعرض لمرة واحدة). */
+  duplicates: number[];
+  /** أرقام من 1..count غير موجودة في البيانات. */
+  missing: number[];
+  /** أرقام آيات خارج نطاق السورة (1..count) — تُتجاهل مع تحذير. */
+  extra: number[];
+  /** آيات صالحة: فريدة، مرتبة تصاعديًا، داخل النطاق القانوني. */
+  sortedVerses: QuranVerse[];
+  /** تحذيرات وصفية (عربية) — لا يُحذف نص قرآني بصمت. */
+  issues: string[];
+};
+
+/**
+ * فحص سورة مقابل العدد القانوني الثابت:
+ *  - يكشف التكرار والنواقص والخارج عن النطاق وعدم الترتيب.
+ *  - يُعيد `sortedVerses` (فرز + إزالة تكرار، النص الأصلي كما ورد حرفيًا).
+ *  - كل انحراف يُعلن في `issues` ليُسجَّل للمطور بدل إسقاط آيات بصمت.
+ * دالة نقية قابلة للاختبار (تُستخدم في سكربت التحقق أيضًا).
+ */
+export function validateQuranSurah(surah: QuranSurah): QuranSurahValidation {
+  const canonicalCount = ayahCountOf(surah.id);
+  const receivedCount = surah.verses.length;
+
+  const emitted = new Set<number>();
+  const duplicates = new Set<number>();
+  const extra = new Set<number>();
+  for (const verse of surah.verses) {
+    const n = verse.verseNumber;
+    if (n < 1 || n > canonicalCount) {
+      extra.add(n);
+      continue;
+    }
+    if (emitted.has(n)) duplicates.add(n);
+    else emitted.add(n);
+  }
+
+  const missing: number[] = [];
+  for (let n = 1; n <= canonicalCount; n += 1) {
+    if (!emitted.has(n)) missing.push(n);
+  }
+
+  const issues: string[] = [];
+  if (receivedCount !== canonicalCount) {
+    issues.push(
+      `سورة ${surah.id}: استُلمت ${receivedCount} آية والمتوقع القانوني ${canonicalCount}`,
+    );
+  }
+  if (duplicates.size > 0) {
+    issues.push(
+      `سورة ${surah.id}: آيات مكررة [${[...duplicates].sort((a, b) => a - b).join(', ')}] — تُعرض لمرة واحدة`,
+    );
+  }
+  if (missing.length > 0) {
+    issues.push(
+      `سورة ${surah.id}: آيات مفقودة [${missing.join(', ')}] — تحقق من مصدر البيانات`,
+    );
+  }
+  if (extra.size > 0) {
+    issues.push(
+      `سورة ${surah.id}: آيات خارج النطاق [${[...extra].sort((a, b) => a - b).join(', ')}] — تجاهلت`,
+    );
+  }
+  if (
+    duplicates.size === 0 &&
+    missing.length === 0 &&
+    extra.size === 0 &&
+    !surah.verses.every((verse, i) => i === 0 || verse.verseNumber === surah.verses[i - 1].verseNumber + 1)
+  ) {
+    issues.push(`سورة ${surah.id}: الآيات غير مرتبة — أعيد ترتيبها حسب رقم الآية`);
+  }
+
+  // فرز + إزالة تكرار: النص الأصلي للأول ظهور يُحفظ كما ورد حرفيًا بلا تحوير.
+  const seenOnce = new Set<number>();
+  const sortedVerses = surah.verses
+    .filter((verse) => {
+      const n = verse.verseNumber;
+      if (n < 1 || n > canonicalCount) return false;
+      if (seenOnce.has(n)) return false;
+      seenOnce.add(n);
+      return true;
+    })
+    .sort((a, b) => a.verseNumber - b.verseNumber);
+
+  const orderIsCanonical =
+    sortedVerses.length === canonicalCount &&
+    sortedVerses.every((verse, i) => verse.verseNumber === i + 1);
+
+  return {
+    surahId: surah.id,
+    canonicalCount,
+    receivedCount,
+    uniqueCount: sortedVerses.length,
+    orderIsCanonical,
+    duplicates: [...duplicates].sort((a, b) => a - b),
+    missing,
+    extra: [...extra].sort((a, b) => a - b),
+    sortedVerses,
+    issues,
+  };
+}
+
 /**
  * تسطيح سورة في مسار المصحف المتصل: تُدمج صفحات السورة (verse.page الحقيقي)
  * مع صفحات السور السابقة المحفوظة — أرقام الصفحات هي المرجع الوحيد للعرض،
@@ -396,17 +543,18 @@ export function flattenSurahIntoQuranPages(
 }
 
 /**
- * صوت آية واحدة (نفس القارئ الافتراضي) — /recitations/{id}/by_ayah/{key}
+ * صوت آية واحدة بالقارئ المحدد — /recitations/{id}/by_ayah/{key}
  * يعيد مسارًا نسبيًا مثل "Alafasy/mp3/002255.mp3" يُبنى فوق
  * audio.qurancdn.com (مُتحقق حيًا 2026-09). المسارات المطلقة تُمرر كما هي.
  */
 export async function fetchAyahAudio(
   surahId: number,
   ayahNumber: number,
+  reciterId: number = DEFAULT_RECITER_ID,
 ): Promise<QuranAudio> {
   const verseKey = `${surahId}:${ayahNumber}`;
   const payload = await fetchJson<{ audio_files?: unknown }>(
-    `${QURAN_COM_API}/recitations/${RECITER_ID}/by_ayah/${encodeURIComponent(verseKey)}`,
+    `${QURAN_COM_API}/recitations/${reciterId}/by_ayah/${encodeURIComponent(verseKey)}`,
     "صوت الآية",
   );
   const files = Array.isArray(payload.audio_files) ? payload.audio_files : [];
@@ -420,7 +568,7 @@ export async function fetchAyahAudio(
   const audioUrl = /^https?:\/\//.test(path)
     ? path
     : `${AYAH_AUDIO_CDN}/${path.replace(/^\//, "")}`;
-  return { surahId, audioUrl, reciter: RECITER_NAME, format: "mp3" };
+  return { surahId, audioUrl, reciter: reciterNameOf(reciterId), format: "mp3" };
 }
 
 // ---------------------------------------------------------------------------

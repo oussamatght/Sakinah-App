@@ -33,7 +33,19 @@ async function main() {
   check("apiSource = hadeethenc.com", page1.items[0]?.apiSource === "hadeethenc.com");
   const page2 = await fetchHadithList("2", 2, 5);
   check("الصفحة 2 مختلفة عن 1", page2.items[0]?.id !== page1.items[0]?.id);
-  check("لا درجات مخترعة في القائمة", page1.items.every((i) => i.grade === undefined));
+  // القوائم خام الآن (لا إثراء داخلي) — الدرجات تُحمَّل كسولًا (useHadithGrade)
+  // عبر نفس مسار التفصيل (/hadeeths/one): البطاقة تعرض بالضبط ما يوفره
+  // التفصيل للمصدر نفسه — تطابق تام بلا اختراع وبلا N× طلب في الجلب الرئيسي.
+  check(
+    "قائمة التصنيف خام (صفر درجات مُصاحبة)",
+    page1.items.every((i) => i.grade === undefined),
+  );
+  let listGradeLazyOk = true;
+  for (const item of page1.items) {
+    const detail = await fetchHadithDetail(item.id);
+    if (detail.grade === undefined) listGradeLazyOk = false;
+  }
+  check("كل بطاقة تحلّ درجتها حرفيًا عبر التفصيل (المسح الكسول)", listGradeLazyOk);
 
   console.log("3) تفصيل بدرجة (66529 حقيقي):");
   const detail = await fetchHadithDetail("66529");
@@ -42,7 +54,7 @@ async function main() {
   check("تخريج حقيقي (ليس المعرّف الداخلي)", detail.reference.length > 0 && detail.reference !== "66529", detail.reference.slice(0, 40));
   check("الشرح منفصل", typeof detail.explanation === "string" && detail.explanation.length > 100);
 
-  console.log("4) تفصيل بلا درجة — المصدر دائمًا يقدم grade في التفاصيل (مُتحقق على 66529/65508/6454/3165/2752): الحالات بلا درجة هي عناصر الكتب (hadis-api) وعناصر القائمة/البحث (لا حقل grade فيها) — وتغطيها التأكيدات أعلاه وأسفل");
+  console.log("4) تفصيل بلا درجة — المصدر دائمًا يقدم grade في التفاصيل (مُتحقق على 66529/65508/6454/3165/2752): الحالات الوحيدة الواقعية لغياب الدرجة هي عناصر الكتب (hadis-api) المغطاة في القسم 6");
   // الحالة الواقعية الوحيدة لغياب الدرجة هي hadis-api — مغطاة في القسم 6.
   // وid=1 غير موجود بالمصدر (يرمي HADITH_NOT_FOUND بشكل صحيح):
   try {
@@ -56,7 +68,13 @@ async function main() {
   console.log("5) البحث (كان معطوبًا — النصوص الفارغة):");
   const results = await searchHadiths("الصيام", 1, 10);
   check("نتائج فعلية (كانت 0 دائمًا)", results.items.length > 0, `${results.items.length} نتيجة`);
-  check("عناصر البحث بلا درجة (المصدر لا يقدمها)", results.items.every((i) => i.grade === undefined));
+  // البحث راجع أيضًا خامًا — كل بطاقة تحلّ درجتها كسولًا عبر /hadeeths/one.
+  let searchGradeLazyOk = true;
+  for (const item of results.items) {
+    const detail = await fetchHadithDetail(item.id);
+    if (detail.grade === undefined) searchGradeLazyOk = false;
+  }
+  check("درجة كل نتيجة بحث تُحلّ كسولًا عبر التفصيل (تطابق تام)", searchGradeLazyOk);
   check("النص مأخوذ من hadith_text", typeof results.items[0]?.text === "string" && results.items[0].text.length > 0);
 
   console.log("6) الكتب والتصفح الكامل:");

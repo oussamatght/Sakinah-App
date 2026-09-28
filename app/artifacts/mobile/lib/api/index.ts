@@ -9,10 +9,15 @@ export {
   fetchQuranJuz,
   groupQuranVersesByPage,
   flattenSurahIntoQuranPages,
+  DEFAULT_RECITER_ID,
+  RECITER_NAMES,
+  reciterNameOf,
   SURAH_AYAH_COUNTS,
   nextAyahPosition,
   prevAyahPosition,
+  validateQuranSurah,
   type AyahPosition,
+  type QuranSurahValidation,
 } from "./quran";
 export {
   fetchHadithCategories,

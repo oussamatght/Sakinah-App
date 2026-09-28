@@ -1,6 +1,8 @@
 import { Platform } from "react-native";
 import { openDatabaseSync, type SQLiteDatabase } from "expo-sqlite";
+import { Directory, File, Paths } from "expo-file-system";
 import type {
+  QuranAudio,
   QuranChapter,
   QuranJuz,
   QuranSurah,
@@ -29,7 +31,10 @@ import type {
  * Schema (surahId+number PK, index on juz; chapters carry the page ranges):
  *   chapters(id, nameArabic, nameEnglish, revelationPlace, versesCount)
  *   verses(surahId, number, text, juz, page)
- *   tafsir(surahId, ayahNumber, resourceName, text) — on-demand cache
+ *   tafsir(surahId, ayahNumber, resourceName, text) — on-demand cache + full download
+ *   surah_audio(surahId, reciterId, url, reciter, format) — whole-surah mp3 of
+ *     the selected reciter; the actual file lives in document/surah-audio/
+ *     (expo-file-system) and the reader prefers it when present (true offline).
  */
 
 const DB_NAME = "sakinah-quran.db";
@@ -66,6 +71,14 @@ function getDb(): SQLiteDatabase | null {
         text TEXT NOT NULL,
         PRIMARY KEY (surahId, ayahNumber)
       );
+      CREATE TABLE IF NOT EXISTS surah_audio (
+        surahId INTEGER NOT NULL,
+        reciterId INTEGER NOT NULL,
+        url TEXT NOT NULL,
+        reciter TEXT NOT NULL,
+        format TEXT NOT NULL,
+        PRIMARY KEY (surahId, reciterId)
+      );
       CREATE TABLE IF NOT EXISTS meta (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -85,11 +98,14 @@ function getDb(): SQLiteDatabase | null {
 export type DownloadState = {
   downloadedAt: string | null;
   ayahCount: number;
+  tafsirCount: number;
+  surahAudioCount: number;
+  audioReciterId: number | null;
 };
 
 export function getOfflineQuranState(): DownloadState {
   const db = getDb();
-  if (!db) return { downloadedAt: null, ayahCount: 0 };
+  if (!db) return { downloadedAt: null, ayahCount: 0, tafsirCount: 0, surahAudioCount: 0, audioReciterId: null };
   try {
     const row = db.getFirstSync<{ value: string }>(
       "SELECT value FROM meta WHERE key = 'quran.downloadedAt'",
@@ -97,9 +113,24 @@ export function getOfflineQuranState(): DownloadState {
     const count = db.getFirstSync<{ total: number }>(
       "SELECT COUNT(*) as total FROM verses",
     );
-    return { downloadedAt: row?.value ?? null, ayahCount: count?.total ?? 0 };
+    const tafsirTotal = db.getFirstSync<{ total: number }>(
+      "SELECT COUNT(*) as total FROM tafsir",
+    );
+    const audioTotal = db.getFirstSync<{ total: number }>(
+      "SELECT COUNT(DISTINCT surahId) as total FROM surah_audio",
+    );
+    const audioReciter = db.getFirstSync<{ reciterId: number }>(
+      "SELECT reciterId FROM surah_audio LIMIT 1",
+    );
+    return {
+      downloadedAt: row?.value ?? null,
+      ayahCount: count?.total ?? 0,
+      tafsirCount: tafsirTotal?.total ?? 0,
+      surahAudioCount: audioTotal?.total ?? 0,
+      audioReciterId: audioReciter?.reciterId ?? null,
+    };
   } catch {
-    return { downloadedAt: null, ayahCount: 0 };
+    return { downloadedAt: null, ayahCount: 0, tafsirCount: 0, surahAudioCount: 0, audioReciterId: null };
   }
 }
 
@@ -152,23 +183,42 @@ function stripLeadingBismillah(text: string): string {
 }
 
 export type DownloadProgress = {
-  /** Stored surahs after the current batch (drives "سورة X من 114"). */
+  /** مرحلة التنزيل الحالية تُعرض في الشاشة (النص: chapters → surahs → tafsir → audio). */
+  phase: "chapters" | "surahs" | "tafsir" | "audio";
+  /** Finished items within the current phase. */
   done: number;
   total: number;
-  /** Overall percentage including the current batch midpoint. */
+  /** Overall percentage including the current phase midpoint. */
   percent: number;
+};
+
+/**
+ * وسائط اختيارية للتنزيل الكامل (مراحل إضافية بعد النص):
+ *  - includeTafsir: حمل تفسير كل آية (الميسّر) ورقنه في جدول tafsir المحلي.
+ *  - includeAudio: حمل صوت السور كاملة (ملف واحد لكل سورة) للقارئ المحدد
+ *    ورقنته في document/surah-audio/ ثم جدول surah_audio (تشغيل بدون إنترنت).
+ */
+export type DownloadMediaOptions = {
+  includeTafsir?: boolean;
+  includeAudio?: boolean;
+  reciterId?: number;
+  fetchSurahAudio?: (surahId: number, reciterId: number) => Promise<QuranAudio>;
+  fetchTafsir?: (surahId: number, ayahNumber: number) => Promise<QuranTafsir>;
 };
 
 /**
  * Downloads the whole Quran (chapters + 114 Uthmani surahs) using the ASYNC
  * API end-to-end. Surahs are fetched in small parallel batches; each batch is
  * committed with withTransactionAsync, and each stored surah is marked in
- * meta so an interrupted download resumes instead of restarting.
+ * meta so an interrupted download resumes instead of restarting. Optional
+ * media phases (tafsir / whole-surah audio) run afterwards and skip rows that
+ * already exist locally.
  */
 export async function downloadQuran(
   fetchSurah: (surahId: number) => Promise<QuranSurah>,
   fetchChapters: () => Promise<QuranChapter[]>,
   onProgress?: (progress: DownloadProgress) => void,
+  media?: DownloadMediaOptions,
 ): Promise<{ ayahCount: number }> {
   const db = getDb();
   if (!db) throw new Error("التخزين المحلي غير متاح على هذا الجهاز");
@@ -237,6 +287,7 @@ export async function downloadQuran(
       }
     });
     onProgress?.({
+      phase: "surahs",
       done,
       total: 114,
       percent: Math.round((done / 114) * 100),
@@ -247,12 +298,172 @@ export async function downloadQuran(
     "INSERT OR REPLACE INTO meta (key, value) VALUES ('quran.downloadedAt', ?)",
     new Date().toISOString(),
   );
+
+  // 3) Whole-surah audio for the selected reciter (offline mp3 files).
+  if (media?.includeAudio && media.fetchSurahAudio && media.reciterId) {
+    const reciterId = Math.round(media.reciterId);
+    let audioDone = 0;
+    for (let surahId = 1; surahId <= 114; surahId += 1) {
+      const existing = getLocalSurahAudio(surahId, reciterId);
+      const existingFile = existing ? getQuranAudioLocalUri(surahId, reciterId) : null;
+      if (!existing || !existingFile) {
+        try {
+          const audio = await media.fetchSurahAudio(surahId, reciterId);
+          await downloadQuranAudioFile(surahId, reciterId, audio.audioUrl);
+          storeLocalSurahAudio(surahId, reciterId, audio);
+        } catch {
+          // سورة واحدة فشلت لا تُوقف الباقي — يمكن إعادة المحاولة لاحقًا.
+        }
+      }
+      audioDone += 1;
+      onProgress?.({
+        phase: "audio",
+        done: audioDone,
+        total: 114,
+        percent: Math.round((audioDone / 114) * 100),
+      });
+    }
+  }
+
+  // 4) Full tafsir for every ayah (ar.muyassar), skipping stored rows.
+  if (media?.includeTafsir && media.fetchTafsir) {
+    const counts = new Map(chapters.map((c) => [c.id, c.versesCount]));
+    const TOTAL_AYAHS = 6236;
+    let tafsirDone = 0;
+    for (let surahId = 1; surahId <= 114; surahId += 1) {
+      const versesCount = counts.get(surahId) ?? 0;
+      for (let ayah = 1; ayah <= versesCount; ayah += 1) {
+        if (getLocalTafsir(surahId, ayah)) {
+          tafsirDone += 1;
+          continue;
+        }
+        try {
+          const tafsir = await media.fetchTafsir(surahId, ayah);
+          storeLocalTafsir(tafsir);
+        } catch {
+          // آية واحدة فشلت — تُترك فارغة ويُعاد التحميل لاحقًا.
+        }
+        tafsirDone += 1;
+      }
+      onProgress?.({
+        phase: "tafsir",
+        done: tafsirDone,
+        total: TOTAL_AYAHS,
+        percent: Math.round((tafsirDone / TOTAL_AYAHS) * 100),
+      });
+    }
+  }
+
   return { ayahCount };
+}
+
+/**
+ * تنزيل سورة واحدة للاستخدام بدون إنترنت: نص السورة دائمًا، وباختيار
+ * المستخدم تفسير آياتها (includeTafsir) وصوتها mp3 (includeAudio) للقارئ
+ * المحدد. نفس مسارات التخزين التي يستعملها التنزيل الكامل، وكل قطعة
+ * موجودة محليًا تُتخطى (تنزيل قابل للاستئناف). لا يلمس quran.downloadedAt —
+ * فالمصحف لا يُعتبر «كاملًا» إلا بكل آياته.
+ */
+export async function downloadQuranSurah(
+  surahId: number,
+  fetchSurah: (id: number) => Promise<QuranSurah>,
+  fetchChapters: () => Promise<QuranChapter[]>,
+  onProgress?: (progress: DownloadProgress) => void,
+  media?: DownloadMediaOptions,
+): Promise<{ ayahCount: number }> {
+  const db = getDb();
+  if (!db) throw new Error("التخزين المحلي غير متاح على هذا الجهاز");
+
+  const surah = await fetchSurah(surahId);
+  onProgress?.({ phase: "surahs", done: 0, total: 1, percent: 0 });
+  storeLocalSurah(surah);
+  onProgress?.({ phase: "surahs", done: 1, total: 1, percent: 100 });
+
+  const reciterId = media?.reciterId ? Math.round(media.reciterId) : null;
+  if (media?.includeAudio && media.fetchSurahAudio && reciterId) {
+    const existing = getLocalSurahAudio(surahId, reciterId);
+    const existingFile = existing ? getQuranAudioLocalUri(surahId, reciterId) : null;
+    onProgress?.({ phase: "audio", done: 0, total: 1, percent: 0 });
+    if (!existing || !existingFile) {
+      try {
+        const audio = await media.fetchSurahAudio(surahId, reciterId);
+        await downloadQuranAudioFile(surahId, reciterId, audio.audioUrl);
+        storeLocalSurahAudio(surahId, reciterId, audio);
+      } catch {
+        // فشل صوت السورة لا يمنع حفظ نصّها — يُعاد لاحقًا.
+      }
+    }
+    onProgress?.({ phase: "audio", done: 1, total: 1, percent: 100 });
+  }
+
+  if (media?.includeTafsir && media.fetchTafsir) {
+    const count = Math.max(surah.verses.length, 1);
+    let tafsirDone = 0;
+    onProgress?.({ phase: "tafsir", done: 0, total: count, percent: 0 });
+    for (let ayah = 1; ayah <= count; ayah += 1) {
+      if (!getLocalTafsir(surahId, ayah)) {
+        try {
+          const tafsir = await media.fetchTafsir(surahId, ayah);
+          storeLocalTafsir(tafsir);
+        } catch {
+          // آية واحدة فاشلة تُعاد في محاولة لاحقة — لا تُوقف بقية السورة.
+        }
+      }
+      tafsirDone += 1;
+      onProgress?.({
+        phase: "tafsir",
+        done: tafsirDone,
+        total: count,
+        percent: Math.round((tafsirDone / count) * 100),
+      });
+    }
+  }
+
+  return { ayahCount: surah.verses.length };
 }
 
 // ---------------------------------------------------------------------------
 // Local reads — SYNC (fast point reads), same shapes the API fetchers return
 // ---------------------------------------------------------------------------
+
+/**
+ * يحفظ سورة واحدة (نصها + سطر chapters + علامة اكتمال) للتلاوة بدون إنترنت.
+ * يُستخدم من "حفظ السورة" في القارئ؛ آمن للاتصال عدة مرات (INSERT OR REPLACE).
+ */
+export function storeLocalSurah(surah: QuranSurah): void {
+  const db = getDb();
+  if (!db) return;
+  try {
+    db.runSync(
+      "INSERT OR REPLACE INTO chapters (id, nameArabic, nameEnglish, revelationPlace, versesCount) VALUES (?, ?, ?, ?, ?)",
+      surah.id,
+      surah.nameArabic,
+      surah.nameEnglish,
+      surah.revelationPlace,
+      surah.versesCount,
+    );
+    for (const verse of surah.verses) {
+      const text =
+        verse.verseNumber === 1 && surah.id !== 1 && surah.id !== 9
+          ? stripLeadingBismillah(verse.text)
+          : verse.text;
+      db.runSync(
+        "INSERT OR REPLACE INTO verses (surahId, number, text, juz, page) VALUES (?, ?, ?, ?, ?)",
+        surah.id,
+        verse.verseNumber,
+        text,
+        verse.juz,
+        verse.page,
+      );
+    }
+    db.runSync(
+      "INSERT OR REPLACE INTO meta (key, value) VALUES (?, '1')",
+      `quran.surah.${surah.id}`,
+    );
+  } catch {
+    // Storage failures are non-fatal by design.
+  }
+}
 
 export function getLocalChapters(): QuranChapter[] | null {
   const db = getDb();
@@ -305,6 +516,79 @@ export function getLocalSurah(surahId: number): QuranSurah | null {
     return { ...chapter, verses };
   } catch {
     return null;
+  }
+}
+
+export type LocalQuranVerseHit = {
+  surahId: number;
+  surah: string;
+  ayah: number;
+  page: number;
+  text: string;
+};
+
+/** Mirrors lib/api/queries.ts normalizeForSearch — plain Arabic so a user typing
+ *  "الكرسي" matches "ٱللَّهُ ... وَسِعَ كُرْسِيُّهُ". */
+const SEARCH_TASHKEEL = /[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u0640]/g;
+
+function normalizeVerseTextForSearch(text: string): string {
+  return text
+    .replace(SEARCH_TASHKEEL, "")
+    .replace(/[ٱأإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه");
+}
+
+/**
+ * بحث نصي مباشر في الآيات المحمَّلة على الجهاز — يطابق نص الآية مع تجاهل
+ * التشكيل والهمزات (بحث "آية بالتسمية"، مثل "الكرسي" أو "الحمد لله").
+ * المطابقة بالكلمات: كل كلمة من البحث يجب أن تظهر في الآية (مع قراءة
+ * كلمات تبدأ بـ"ال" بدون ال كذلك يكفي "كرسيه" لطوف "الكرسي").
+ * بالترتيب المصحفي، ويعيد [] على الويب (لا مخزن محلي).
+ */
+export function searchLocalQuranVerses(query: string, limit = 60): LocalQuranVerseHit[] {
+  const db = getDb();
+  if (!db) return [];
+  const tokens = normalizeVerseTextForSearch(query.trim())
+    .split(/\s+/)
+    .filter(Boolean);
+  if (tokens.length === 0) return [];
+  try {
+    const rows = db.getAllSync<{
+      surahId: number;
+      number: number;
+      page: number;
+      text: string;
+      nameArabic: string;
+    }>(
+      `SELECT v.surahId, v.number, v.page, v.text, c.nameArabic
+       FROM verses v JOIN chapters c ON c.id = v.surahId
+       ORDER BY v.surahId, v.number`,
+    );
+    const hits: LocalQuranVerseHit[] = [];
+    for (const row of rows) {
+      const normalized = normalizeVerseTextForSearch(row.text);
+      let everyToken = true;
+      for (const token of tokens) {
+        if (normalized.includes(token)) continue;
+        const withoutAl = token.length > 2 && token.startsWith("ال") ? token.slice(2) : null;
+        if (withoutAl && normalized.includes(withoutAl)) continue;
+        everyToken = false;
+        break;
+      }
+      if (!everyToken) continue;
+      hits.push({
+        surahId: row.surahId,
+        surah: row.nameArabic,
+        ayah: row.number,
+        page: row.page,
+        text: row.text,
+      });
+      if (hits.length >= limit) break;
+    }
+    return hits;
+  } catch {
+    return [];
   }
 }
 
@@ -404,6 +688,93 @@ export function storeLocalTafsir(tafsir: QuranTafsir): void {
     );
   } catch {
     // Cache write failures are non-fatal by design.
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Whole-surah audio for the selected reciter — stored DB row + real mp3 file
+// ---------------------------------------------------------------------------
+
+const AUDIO_DIR = "surah-audio";
+
+function audioFileFor(surahId: number, reciterId: number): File {
+  return new File(new Directory(Paths.document, AUDIO_DIR), `${reciterId}-${surahId}.mp3`);
+}
+
+/**
+ * ينزّل ملف mp3 لسورة/قارئ إلى ذاكرة التطبيق (document/surah-audio) ويعيد
+ * موقعه المحلي. ملف موجود مسبقًا لا يُعاد تنزيله (يُستخدم مباشرة).
+ */
+export async function downloadQuranAudioFile(
+  surahId: number,
+  reciterId: number,
+  url: string,
+): Promise<string> {
+  const dir = new Directory(Paths.document, AUDIO_DIR);
+  if (!dir.exists) dir.create();
+  const file = audioFileFor(surahId, reciterId);
+  if (file.exists) return file.uri;
+  const downloaded = await File.downloadFileAsync(url, file);
+  return downloaded.uri;
+}
+
+/** المسار المحلي لملف mp3 (إن وُجد) — القراءة به = تشغيل حقيقي بدون إنترنت. */
+export function getQuranAudioLocalUri(
+  surahId: number,
+  reciterId: number,
+): string | null {
+  try {
+    const file = audioFileFor(surahId, reciterId);
+    return file.exists ? file.uri : null;
+  } catch {
+    return null;
+  }
+}
+
+export function getLocalSurahAudio(
+  surahId: number,
+  reciterId: number,
+): QuranAudio | null {
+  const db = getDb();
+  if (!db) return null;
+  try {
+    const row = db.getFirstSync<
+      { surahId: number; reciterId: number; url: string; reciter: string; format: string }
+    >(
+      "SELECT surahId, reciterId, url, reciter, format FROM surah_audio WHERE surahId = ? AND reciterId = ?",
+      surahId,
+      reciterId,
+    );
+    if (!row) return null;
+    return {
+      surahId: row.surahId,
+      audioUrl: row.url,
+      reciter: row.reciter,
+      format: row.format,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function storeLocalSurahAudio(
+  surahId: number,
+  reciterId: number,
+  audio: QuranAudio,
+): void {
+  const db = getDb();
+  if (!db) return;
+  try {
+    db.runSync(
+      "INSERT OR REPLACE INTO surah_audio (surahId, reciterId, url, reciter, format) VALUES (?, ?, ?, ?, ?)",
+      surahId,
+      reciterId,
+      audio.audioUrl,
+      audio.reciter,
+      audio.format,
+    );
+  } catch {
+    // Non-fatal: online playback still works.
   }
 }
 

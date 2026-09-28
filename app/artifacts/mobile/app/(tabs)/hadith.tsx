@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+
 import {
   FlatList,
   Pressable,
@@ -10,18 +11,23 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
+
 import {
   fetchHadithByNumber,
   getHadithBookSections,
   useGetBookHadiths,
   useGetHadithBooks,
+  useGetHadithByNumber,
   useGetHadithCategories,
   useGetHadithSearch,
   useGetHadiths,
+  usePrefetchNextHadithPage,
   type HadithBookSection,
   type HadithItem,
 } from "@/lib/api";
+
 import { getOfflineHadiths } from "@/lib/offline/hadithDb";
+
 import {
   AppHeader,
   ErrorState,
@@ -30,41 +36,62 @@ import {
   LoadingState,
   Screen,
 } from "@/components/ui";
+
 import { FavoriteButton } from "@/components/FavoriteButton";
-import { GradeBadge } from "@/components/GradeBadge";
+import { ItemGrade } from "@/components/GradeBadge";
 import { radii, spacing, typography } from "@/constants/tokens";
 import { useColors } from "@/hooks/useColors";
-import HadithBrowser from "../hadith-browser";
-/** Entry mode: canonical books (with sections + search) or thematic categories. */
+
+/**
+ * Entry mode:
+ * canonical books or thematic categories.
+ */
 type Mode = "books" | "topics";
-/** نوع البحث داخل كتاب: نص موضوعي أو رقم حديث. */
+
+/**
+ * نوع البحث داخل كتاب:
+ * نص موضوعي أو رقم حديث.
+ */
 type SearchKind = "text" | "number";
 
 /**
- * إصلاح التداخل مع الـ Tab Bar: أعمق نقطة هي ListFooterComponent —
- * paddingBottom دائم بحساب التراكب (TabBar 84 + bottom inset).
+ * إصلاح التداخل مع الـ Tab Bar.
  */
-const TAB_BAR_HEIGHT = 84; // نفس القيمة المضبوطة في (tabs)/_layout.tsx للويب
+const TAB_BAR_HEIGHT = 84;
 
+/**
+ * تحويل الأرقام الإنجليزية إلى عربية.
+ */
 function toArabicDigits(value: number | string): string {
   return String(value).replace(/[0-9]/g, (d) => "٠١٢٣٤٥٦٧٨٩"[Number(d)]);
 }
 
 /**
- * بطاقة حديث واحدة — قابلة لإعادة الاستخدام في كل القوائم:
- * نص + مفضلة + شارة درجة (أو «غير متوفرة» إن غاب المصدر) + الراوي إن وُجد
- * + التخريج (المصدر: كتاب — رقم الحديث) + دعوة التفصيل لمصدر hadeethenc.
+ * بطاقة حديث واحدة.
+ *
+ * showMissingGrade:
+ * - true  => تظهر درجة الحديث حتى لو كانت غير متوفرة.
+ * - false => لا تظهر "درجة الحديث غير متوفرة".
+ *
+ * في المواضيع نمرر false حتى لا تظهر الرسالة.
+ *
+ * bookSlug: ضروري لحديث من الكتب (hadis-api-id) لتحميل درجته كسولًا
+ * (useHadithGrade) من fawaz — تُترك undefined لمواضيع HadeethEnc.
  */
 function HadithCard({
   item,
   bookTitle,
   onPress,
   colors,
+  showMissingGrade = true,
+  bookSlug,
 }: {
   item: HadithItem;
   bookTitle: string;
   onPress?: () => void;
   colors: ReturnType<typeof useColors>;
+  showMissingGrade?: boolean;
+  bookSlug?: string | null;
 }) {
   return (
     <Pressable
@@ -74,12 +101,16 @@ function HadithCard({
       disabled={!onPress}
       style={[
         styles.hadithCard,
-        { backgroundColor: colors.card, borderColor: colors.border },
+        {
+          backgroundColor: colors.card,
+          borderColor: colors.border,
+        },
       ]}>
       <View style={styles.hadithTop}>
         <Text style={[styles.hadithText, { color: colors.foreground }]}>
           {item.text}
         </Text>
+
         <FavoriteButton
           item={{
             kind: "hadith",
@@ -90,24 +121,29 @@ function HadithCard({
           }}
         />
       </View>
-      {/* الدرجة: حرفية من المصدر — والكتب الخمسة يحملها الإثراء العربي.
-          «غير متوفرة» تعني صراحةً أن المصدر لا يقدم درجة لهذا الحديث. */}
+
       <View style={styles.hadithMetaRow}>
-        <GradeBadge grade={item.grade} showMissing />
+        {/* الدرجة تُحمّل كسولًا: لا تُحبس القائمة، المصدر/الحقل كما هو،
+            بلا أي اختراع (البادج "غير متوفرة" حسب showMissingGrade). */}
+        <ItemGrade item={item} bookSlug={bookSlug} showMissing={showMissingGrade} />
+
         {item.attribution ? (
           <Text
             style={[styles.hadithMetaText, { color: colors.mutedForeground }]}>
             الراوي: {item.attribution}
           </Text>
         ) : null}
+
         {onPress ? (
           <Text style={[styles.detailHint, { color: colors.primary }]}>
-            التفاصيل والشرح ←
+            اضغط على الحديث للتفاصيل والشرح
           </Text>
         ) : null}
       </View>
+
       <View style={styles.hadithFooter}>
         <Feather name="bookmark" size={14} color={colors.primary} />
+
         <Text
           style={[styles.hadithSource, { color: colors.primary }]}
           numberOfLines={1}>
@@ -121,45 +157,87 @@ function HadithCard({
 
 /**
  * تبويب الأحاديث:
- *  - الكتب التسعة: فهرس أبواب عربي قابل للفتح + شارة درجة عربية (الإثراء
- *    من fawazahmed0) + الراوي إن وُجد + تصفح بالصفحات.
- *  - البحث: داخل كتاب — نص موضوعي (hadeethenc) أو برقم الحديث (جلب مباشر
- *    من hadis-api-id)؛ وفي المواضيع — نص موضوعي + ما هو مخزّن offline.
- *    النطاق يوضح بصريًا في placeholder الحقل.
+ *
+ * - الكتب:
+ *   فهرس أبواب + درجات + الراوي + صفحات.
+ *
+ * - المواضيع:
+ *   تصنيف موضوعي + البحث + offline.
  */
 export default function HadithTab() {
   const colors = useColors();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+
   const bottomOverlap = TAB_BAR_HEIGHT + insets.bottom;
+
   const booksQuery = useGetHadithBooks();
   const categoriesQuery = useGetHadithCategories();
+
   const [mode, setMode] = useState<Mode>("books");
+
   const [selectedBook, setSelectedBook] = useState<string | null>(null);
+
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+
   const [page, setPage] = useState(1);
-  // فهرس الأبواب: null = قائمة عادية؛ قسم مفتوح = أحاديث ذلك الباب.
+
+  /**
+   * فهرس الأبواب.
+   */
   const [openSection, setOpenSection] = useState<HadithBookSection | null>(
     null,
   );
+
   const [indexVisible, setIndexVisible] = useState(false);
-  // البحث: نصه ونوعه، والبحث النصي يُفعّل بعد submit (لا طلبات أثناء الكتابة).
+
+  /**
+   * البحث.
+   */
   const [searchText, setSearchText] = useState("");
+
   const [submittedText, setSubmittedText] = useState("");
+
   const [searchKind, setSearchKind] = useState<SearchKind>("text");
-  // نتيجة البحث بالرقم: undefined = جارٍ، null = لا يوجد، HadithItem = وُجد.
+
+  /**
+   * نتيجة البحث بالرقم:
+   * undefined = جارٍ
+   * null = لا يوجد
+   * HadithItem = موجود
+   */
   const [numberResult, setNumberResult] = useState<
     HadithItem | null | undefined
   >(undefined);
 
+  /**
+   * قائمة المزيد.
+   */
+  const [moreVisible, setMoreVisible] = useState(false);
+
+  /**
+   * جلب أحاديث الكتاب.
+   */
   const listQuery = useGetBookHadiths(
     mode === "books" && selectedBook && !openSection && !submittedText
-      ? { bookSlug: selectedBook, page, perPage: 10 }
+      ? {
+          bookSlug: selectedBook,
+          page,
+          perPage: 10,
+        }
       : null,
   );
+
+  /**
+   * جلب أحاديث الموضوع.
+   */
   const topicQuery = useGetHadiths(
     mode === "topics" && selectedCategory && !submittedText
-      ? { categoryId: selectedCategory, page, perPage: 10 }
+      ? {
+          categoryId: selectedCategory,
+          page,
+          perPage: 10,
+        }
       : undefined,
     {
       query: {
@@ -168,6 +246,10 @@ export default function HadithTab() {
       },
     },
   );
+
+  /**
+   * البحث النصي.
+   */
   const searchQuery = useGetHadithSearch(
     submittedText.trim().length >= 2 && searchKind === "text"
       ? submittedText.trim()
@@ -175,72 +257,130 @@ export default function HadithTab() {
   );
 
   const books = booksQuery.data ?? [];
+
   const currentBook = books.find(
     (candidate) => candidate.slug === selectedBook,
   );
+
   const sections = selectedBook ? getHadithBookSections(selectedBook) : [];
+
   const categories = categoriesQuery.data ?? [];
+
   const activeList = mode === "books" ? listQuery : topicQuery;
 
-  // البحث بالرقم داخل الكتاب المحدد — جلب مباشر من hadis-api-id.
+  /**
+   * اجلب الصفحة التالية وحدها في الخلفية (عند وجودها): وعند الضغط على
+   * "التالي" تكون مخزنة وطازجة فتُعرض فورًا بلا طلب/دوران.
+   */
+  usePrefetchNextHadithPage({
+    enabled:
+      Boolean(selectedBook || selectedCategory) &&
+      !openSection &&
+      submittedText.trim().length === 0,
+    bookSlug: mode === "books" ? selectedBook : null,
+    categoryId: mode === "topics" ? selectedCategory : null,
+    page,
+    perPage: 10,
+    hasMore: activeList.data?.hasMore ?? false,
+  });
+
+  /**
+   * البحث بالرقم داخل الكتاب.
+   */
   useEffect(() => {
-    if (searchKind !== "number" || submittedText.trim() === "") return;
+    if (searchKind !== "number" || submittedText.trim() === "") {
+      return;
+    }
+
     const parsed = Number.parseInt(submittedText.trim(), 10);
+
     if (!Number.isInteger(parsed) || parsed < 1 || !selectedBook) {
       setNumberResult(null);
       return;
     }
+
     let active = true;
+
     setNumberResult(undefined);
+
     fetchHadithByNumber(selectedBook, parsed)
       .then((item) => {
-        if (active) setNumberResult(item);
+        if (active) {
+          setNumberResult(item);
+        }
       })
       .catch(() => {
-        if (active) setNumberResult(null);
+        if (active) {
+          setNumberResult(null);
+        }
       });
+
     return () => {
       active = false;
     };
   }, [searchKind, selectedBook, submittedText]);
 
-  /** نتائج البحث المحلي (offline cache) — تظهر دائمًا مع البحث النصي. */
+  /**
+   * نتائج البحث المحلي offline.
+   */
   const offlineHits = useMemo(() => {
-    if (searchKind !== "text") return [];
+    if (searchKind !== "text") {
+      return [];
+    }
+
     const needle = submittedText.trim();
-    if (needle.length < 2) return [];
+
+    if (needle.length < 2) {
+      return [];
+    }
+
     try {
       const cached = getOfflineHadiths(200);
+
       return cached.filter((item) => item.text.includes(needle)).slice(0, 20);
     } catch {
       return [];
     }
   }, [searchKind, submittedText]);
 
+  /**
+   * العودة للقائمة الرئيسية.
+   */
   const backToList = () => {
     setSelectedBook(null);
     setSelectedCategory(null);
     setOpenSection(null);
     setIndexVisible(false);
     setPage(1);
+    setMoreVisible(false);
   };
 
+  /**
+   * مسح البحث.
+   */
   const clearSearch = () => {
     setSearchText("");
     setSubmittedText("");
     setNumberResult(undefined);
+    setPage(1);
   };
 
+  /**
+   * عنوان الشاشة.
+   */
   const headerTitle =
     mode === "books"
       ? (currentBook?.nameAr ?? "الأحاديث")
-      : (categories.find((c) => c.id === selectedCategory)?.titleAr ??
-        "المواضيع");
+      : (categories.find((category) => category.id === selectedCategory)
+          ?.titleAr ?? "المواضيع");
 
-  // ------------------------- القائمة الرئيسية (كتب/مواضيع) -------------------------
+  /**
+   * القائمة الرئيسية:
+   * الكتب / المواضيع.
+   */
   if (!selectedBook && !selectedCategory) {
     return (
-      <Screen>
+      <Screen scroll={false}>
         <AppHeader
           eyebrow="من وحي السنة"
           title="الأحاديث"
@@ -248,10 +388,13 @@ export default function HadithTab() {
           actionLabel="الإعدادات"
           onAction={() => router.push("/settings")}
         />
+
         <View style={styles.modeTabs}>
           <Pressable
             accessibilityRole="tab"
-            accessibilityState={{ selected: mode === "books" }}
+            accessibilityState={{
+              selected: mode === "books",
+            }}
             onPress={() => {
               setMode("books");
               backToList();
@@ -259,7 +402,9 @@ export default function HadithTab() {
             }}
             style={[
               styles.modeTab,
-              mode === "books" && { backgroundColor: colors.primary },
+              mode === "books" && {
+                backgroundColor: colors.primary,
+              },
             ]}>
             <Text
               style={[
@@ -274,9 +419,12 @@ export default function HadithTab() {
               الكتب
             </Text>
           </Pressable>
+
           <Pressable
             accessibilityRole="tab"
-            accessibilityState={{ selected: mode === "topics" }}
+            accessibilityState={{
+              selected: mode === "topics",
+            }}
             onPress={() => {
               setMode("topics");
               backToList();
@@ -284,7 +432,9 @@ export default function HadithTab() {
             }}
             style={[
               styles.modeTab,
-              mode === "topics" && { backgroundColor: colors.primary },
+              mode === "topics" && {
+                backgroundColor: colors.primary,
+              },
             ]}>
             <Text
               style={[
@@ -304,6 +454,7 @@ export default function HadithTab() {
         {mode === "books" ? (
           <>
             {booksQuery.isPending ? <LoadingState /> : null}
+
             {booksQuery.isError ? (
               <ErrorState
                 offline={isOfflineError(booksQuery.error)}
@@ -316,7 +467,9 @@ export default function HadithTab() {
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={[
                   styles.list,
-                  { paddingBottom: bottomOverlap + spacing.md },
+                  {
+                    paddingBottom: bottomOverlap + spacing.md,
+                  },
                 ]}
                 renderItem={({ item }) => (
                   <Pressable
@@ -338,7 +491,9 @@ export default function HadithTab() {
                     <View
                       style={[
                         styles.rowIcon,
-                        { backgroundColor: colors.secondary },
+                        {
+                          backgroundColor: colors.secondary,
+                        },
                       ]}>
                       <Feather
                         name="book-open"
@@ -346,22 +501,34 @@ export default function HadithTab() {
                         color={colors.primary}
                       />
                     </View>
+
                     <View style={styles.rowCopy}>
                       <Text
-                        style={[styles.rowTitle, { color: colors.foreground }]}>
+                        style={[
+                          styles.rowTitle,
+                          {
+                            color: colors.foreground,
+                          },
+                        ]}>
                         {item.nameAr}
                       </Text>
+
                       <Text
                         style={[
                           styles.rowMeta,
-                          { color: colors.mutedForeground },
+                          {
+                            color: colors.mutedForeground,
+                          },
                         ]}>
                         {item.total} حديث
                         {getHadithBookSections(item.slug).length > 0
-                          ? ` • ${getHadithBookSections(item.slug).length} بابًا`
+                          ? ` • ${
+                              getHadithBookSections(item.slug).length
+                            } بابًا`
                           : ""}
                       </Text>
                     </View>
+
                     <Feather
                       name="chevron-left"
                       size={18}
@@ -375,6 +542,7 @@ export default function HadithTab() {
         ) : (
           <>
             {categoriesQuery.isPending ? <LoadingState /> : null}
+
             {categoriesQuery.isError ? (
               <ErrorState
                 offline={isOfflineError(categoriesQuery.error)}
@@ -387,7 +555,9 @@ export default function HadithTab() {
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={[
                   styles.list,
-                  { paddingBottom: bottomOverlap + spacing.md },
+                  {
+                    paddingBottom: bottomOverlap + spacing.md,
+                  },
                 ]}
                 renderItem={({ item }) => (
                   <Pressable
@@ -409,23 +579,35 @@ export default function HadithTab() {
                     <View
                       style={[
                         styles.rowIcon,
-                        { backgroundColor: colors.secondary },
+                        {
+                          backgroundColor: colors.secondary,
+                        },
                       ]}>
                       <Feather name="tag" size={19} color={colors.primary} />
                     </View>
+
                     <View style={styles.rowCopy}>
                       <Text
-                        style={[styles.rowTitle, { color: colors.foreground }]}>
+                        style={[
+                          styles.rowTitle,
+                          {
+                            color: colors.foreground,
+                          },
+                        ]}>
                         {item.titleAr}
                       </Text>
+
                       <Text
                         style={[
                           styles.rowMeta,
-                          { color: colors.mutedForeground },
+                          {
+                            color: colors.mutedForeground,
+                          },
                         ]}>
                         {item.count} حديث
                       </Text>
                     </View>
+
                     <Feather
                       name="chevron-left"
                       size={18}
@@ -441,15 +623,60 @@ export default function HadithTab() {
     );
   }
 
-  // ------------------------- داخل كتاب/موضوع -------------------------
+  /**
+   * الأحاديث الحالية.
+   */
   const items = activeList.data?.items ?? [];
-  const hasMore = activeList.data?.hasMore ?? false;
+
+  const reportedTotal = Number(activeList.data?.total ?? 0);
+  const reportedPerPage = Math.max(
+    1,
+    Number(activeList.data?.perPage ?? 10),
+  );
+  const reportedTotalPages = Math.max(
+    0,
+    Number(
+      (activeList.data as { totalPages?: number } | undefined)?.totalPages ??
+        0,
+    ),
+  );
+
+  /**
+   * لا نفترض أن الـAPI يعيد totalPages دائمًا.
+   * إذا كانت الصفحة الحالية ممتلئة بـperPage عناصر، نسمح بالانتقال
+   * للصفحة التالية حتى لو كانت metadata القديمة ناقصة.
+   */
+  const totalPages =
+    reportedTotalPages > 0
+      ? reportedTotalPages
+      : reportedTotal > 0
+        ? Math.max(1, Math.ceil(reportedTotal / reportedPerPage))
+        : Math.max(1, page);
+
+  const explicitHasMore = activeList.data?.hasMore;
+  const inferredHasMore = items.length >= reportedPerPage;
+  const hasMore =
+    explicitHasMore === true
+      ? true
+      : explicitHasMore === false
+        ? false
+        : page < totalPages || inferredHasMore;
+
+  const canGoPrevious = page > 1 && !activeList.isPending;
+
+  const canGoNext =
+    !activeList.isPending &&
+    !activeList.isFetching &&
+    hasMore;
+
   const searchNumberActive =
     submittedText.trim() !== "" && searchKind === "number";
+
   const searchTextActive =
     submittedText.trim().length >= 2 &&
     searchKind === "text" &&
     mode === "topics";
+
   const searchPlaceholder =
     searchKind === "number"
       ? `اكتب رقم الحديث داخل ${currentBook?.nameAr ?? "الكتاب"}…`
@@ -457,7 +684,6 @@ export default function HadithTab() {
         ? "بحث نصي موضوعي في كل الكتب (hadeethenc)…"
         : `بحث في ${headerTitle} وفي ما خُزّن للقراءة دون اتصال…`;
 
-  // ملاحظة نطاق البحث — تُوضح للمستخدم أين يبحث فعليًا.
   const searchScopeNote =
     searchKind === "number"
       ? `البحث بالرقم داخل: ${currentBook?.nameAr ?? "—"}`
@@ -465,6 +691,9 @@ export default function HadithTab() {
         ? "البحث النصي: كل الأحاديث موضوعيًا (موسوعة الأحاديث)"
         : `البحث: ${headerTitle} + المحتوى المخزّن offline`;
 
+  /**
+   * نتيجة البحث بالرقم.
+   */
   const numberResultView =
     numberResult === undefined ? (
       <LoadingState />
@@ -473,14 +702,117 @@ export default function HadithTab() {
         <Text
           style={[
             styles.searchFeedbackText,
-            { color: colors.mutedForeground },
+            {
+              color: colors.mutedForeground,
+            },
           ]}>
           لا يوجد حديث بهذا الرقم في {currentBook?.nameAr ?? "هذا الكتاب"}.
         </Text>
       </View>
     ) : (
-      <HadithCard item={numberResult} bookTitle={headerTitle} colors={colors} />
+      <HadithCard
+        item={numberResult}
+        bookTitle={headerTitle}
+        onPress={
+          selectedBook
+            ? () =>
+                router.push(
+                  `/hadith-detail?book=${encodeURIComponent(
+                    selectedBook,
+                  )}&number=${encodeURIComponent(numberResult.reference)}`,
+                )
+            : undefined
+        }
+        colors={colors}
+        showMissingGrade={true}
+        bookSlug={selectedBook}
+      />
     );
+
+  /**
+   * Toggle الفهرس.
+   */
+  const toggleIndex = () => {
+    setIndexVisible((visible) => !visible);
+    setOpenSection(null);
+    setMoreVisible(false);
+  };
+
+  /**
+   * شريط pagination ثابت وواضح.
+   * وضعه أعلى وأسفل القائمة يمنع اختفاء زر "التالي" بعد آخر حديث.
+   */
+  const renderPager = () => (
+    <View style={styles.pager}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="الصفحة السابقة"
+        disabled={!canGoPrevious}
+        onPress={() => setPage((value) => Math.max(value - 1, 1))}
+        style={({ pressed }) => [
+          styles.pagerButton,
+          {
+            backgroundColor: colors.secondary,
+            opacity: !canGoPrevious ? 0.4 : pressed ? 0.7 : 1,
+          },
+        ]}>
+        <Feather name="chevron-right" size={17} color={colors.primary} />
+        <Text style={[styles.pagerText, { color: colors.primary }]}>
+          السابق
+        </Text>
+      </Pressable>
+
+      <View
+        style={[
+          styles.pageIndicator,
+          {
+            backgroundColor: colors.card,
+            borderColor: colors.border,
+          },
+        ]}>
+        <Text style={[styles.pageIndicatorText, { color: colors.foreground }]}>
+          {toArabicDigits(page)}
+        </Text>
+      </View>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="الصفحة التالية"
+        disabled={!canGoNext}
+        onPress={() => setPage((value) => value + 1)}
+        style={({ pressed }) => [
+          styles.pagerButton,
+          {
+            backgroundColor: colors.secondary,
+            opacity: !canGoNext ? 0.4 : pressed ? 0.7 : 1,
+          },
+        ]}>
+        <Text style={[styles.pagerText, { color: colors.primary }]}>
+          التالي
+        </Text>
+        <Feather name="chevron-left" size={17} color={colors.primary} />
+      </Pressable>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="الانتقال إلى الصفحة التالية"
+        disabled={!canGoNext}
+        onPress={() => setPage((value) => value + 1)}
+        style={({ pressed }) => [
+          styles.nextPageArrow,
+          {
+            backgroundColor: colors.primary,
+            opacity: !canGoNext ? 0.35 : pressed ? 0.7 : 1,
+          },
+        ]}>
+        <Feather
+          name="arrow-left"
+          size={20}
+          color={colors.primaryForeground}
+        />
+      </Pressable>
+    </View>
+  );
 
   return (
     <Screen scroll={false}>
@@ -495,34 +827,39 @@ export default function HadithTab() {
           variant="soft"
         />
         <View style={styles.titleCopy}>
-          <Text style={[styles.screenTitle, { color: colors.foreground }]}>
+          <Text
+            style={[
+              styles.screenTitle,
+              {
+                color: colors.foreground,
+              },
+            ]}>
             {openSection ? openSection.titleAr : headerTitle}
           </Text>
-          <Text style={[styles.screenMeta, { color: colors.mutedForeground }]}>
+
+          <Text
+            style={[
+              styles.screenMeta,
+              {
+                color: colors.mutedForeground,
+              },
+            ]}>
             {openSection
-              ? `${toArabicDigits(openSection.hadiths.length)} حديث في هذا الباب`
-              : `الصفحة ${toArabicDigits(activeList.data?.page ?? page)} من ${
-                  activeList.data
-                    ? toArabicDigits(
-                        Math.ceil(
-                          activeList.data.total / activeList.data.perPage,
-                        ),
-                      )
-                    : "—"
-                }`}
+              ? `${toArabicDigits(
+                  openSection.hadiths.length,
+                )} حديث في هذا الباب`
+              : `الصفحة ${toArabicDigits(
+                  activeList.data?.page ?? page,
+                )} من ${toArabicDigits(totalPages)}`}
           </Text>
         </View>
-        {/* زر الفهرس — للكتب ذات الأبواب فقط */}
         {mode === "books" && sections.length > 0 ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={
               indexVisible ? "العودة لقائمة الأحاديث" : "فتح فهرس الأبواب"
             }
-            onPress={() => {
-              setIndexVisible((visible) => !visible);
-              setOpenSection(null);
-            }}
+            onPress={toggleIndex}
             style={({ pressed }) => [
               styles.indexButton,
               {
@@ -537,6 +874,7 @@ export default function HadithTab() {
               size={17}
               color={indexVisible ? colors.primaryForeground : colors.primary}
             />
+
             <Text
               style={[
                 styles.indexButtonText,
@@ -550,12 +888,128 @@ export default function HadithTab() {
             </Text>
           </Pressable>
         ) : null}
+        /** * زر المزيد. */
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="المزيد من الخيارات"
+          onPress={() => setMoreVisible((visible) => !visible)}
+          style={({ pressed }) => [
+            styles.moreButton,
+            {
+              backgroundColor: moreVisible ? colors.primary : colors.secondary,
+              opacity: pressed ? 0.7 : 1,
+            },
+          ]}>
+          <Feather
+            name="more-vertical"
+            size={19}
+            color={moreVisible ? colors.primaryForeground : colors.primary}
+          />
+        </Pressable>
       </View>
+      /** * قائمة المزيد. */
+      {moreVisible ? (
+        <View
+          style={[
+            styles.moreMenu,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+            },
+          ]}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="مسح البحث"
+            onPress={() => {
+              clearSearch();
+              setMoreVisible(false);
+            }}
+            style={({ pressed }) => [
+              styles.moreMenuItem,
+              {
+                opacity: pressed ? 0.65 : 1,
+              },
+            ]}>
+            <Feather name="x-circle" size={17} color={colors.primary} />
 
-      {/* شريط البحث: نصي ↔ رقم، مع نطاق مكتوب صراحةً تحت الحقل */}
+            <Text
+              style={[
+                styles.moreMenuText,
+                {
+                  color: colors.foreground,
+                },
+              ]}>
+              مسح البحث
+            </Text>
+          </Pressable>
+
+          {mode === "books" && sections.length > 0 ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="فتح الفهرس"
+              onPress={() => {
+                setIndexVisible(true);
+                setOpenSection(null);
+                setMoreVisible(false);
+              }}
+              style={({ pressed }) => [
+                styles.moreMenuItem,
+                {
+                  opacity: pressed ? 0.65 : 1,
+                },
+              ]}>
+              <Feather name="list" size={17} color={colors.primary} />
+
+              <Text
+                style={[
+                  styles.moreMenuText,
+                  {
+                    color: colors.foreground,
+                  },
+                ]}>
+                فتح الفهرس
+              </Text>
+            </Pressable>
+          ) : null}
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="العودة للقائمة"
+            onPress={() => {
+              backToList();
+              clearSearch();
+            }}
+            style={({ pressed }) => [
+              styles.moreMenuItem,
+              {
+                opacity: pressed ? 0.65 : 1,
+              },
+            ]}>
+            <Feather name="arrow-right" size={17} color={colors.primary} />
+
+            <Text
+              style={[
+                styles.moreMenuText,
+                {
+                  color: colors.foreground,
+                },
+              ]}>
+              العودة للقائمة
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
+      /** * شريط البحث. */
       <View style={styles.searchWrap}>
-        <View style={[styles.searchBar, { backgroundColor: colors.secondary }]}>
+        <View
+          style={[
+            styles.searchBar,
+            {
+              backgroundColor: colors.secondary,
+            },
+          ]}>
           <Feather name="search" size={17} color={colors.mutedForeground} />
+
           <TextInput
             value={searchText}
             onChangeText={setSearchText}
@@ -564,14 +1018,21 @@ export default function HadithTab() {
             placeholder={searchPlaceholder}
             placeholderTextColor={colors.mutedForeground}
             accessibilityLabel="حقل البحث في الأحاديث"
-            style={[styles.searchInput, { color: colors.foreground }]}
+            style={[
+              styles.searchInput,
+              {
+                color: colors.foreground,
+              },
+            ]}
           />
+
           {mode === "books" && selectedBook ? (
             <Pressable
               onPress={() => {
                 setSearchKind((kind) =>
                   kind === "number" ? "text" : "number",
                 );
+
                 setSubmittedText("");
                 setNumberResult(undefined);
               }}
@@ -579,17 +1040,23 @@ export default function HadithTab() {
               accessibilityLabel="تبديل نوع البحث بين النص والرقم"
               style={({ pressed }) => [
                 styles.searchKindToggle,
-                { backgroundColor: colors.primary, opacity: pressed ? 0.8 : 1 },
+                {
+                  backgroundColor: colors.primary,
+                  opacity: pressed ? 0.8 : 1,
+                },
               ]}>
               <Text
                 style={[
                   styles.searchKindText,
-                  { color: colors.primaryForeground },
+                  {
+                    color: colors.primaryForeground,
+                  },
                 ]}>
                 {searchKind === "number" ? "بالرقم" : "بالنص"}
               </Text>
             </Pressable>
           ) : null}
+
           {searchText ? (
             <Pressable
               onPress={clearSearch}
@@ -599,12 +1066,18 @@ export default function HadithTab() {
             </Pressable>
           ) : null}
         </View>
-        <Text style={[styles.searchScope, { color: colors.mutedForeground }]}>
+
+        <Text
+          style={[
+            styles.searchScope,
+            {
+              color: colors.mutedForeground,
+            },
+          ]}>
           {searchScopeNote}
         </Text>
       </View>
-
-      {/* فهرس الأبواب */}
+      /** * فهرس الأبواب. */
       {indexVisible && !openSection ? (
         <FlatList
           data={sections}
@@ -612,7 +1085,9 @@ export default function HadithTab() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[
             styles.list,
-            { paddingBottom: bottomOverlap + spacing.md },
+            {
+              paddingBottom: bottomOverlap + spacing.md,
+            },
           ]}
           renderItem={({ item: section }) => (
             <Pressable
@@ -627,22 +1102,38 @@ export default function HadithTab() {
                   opacity: pressed ? 0.7 : 1,
                 },
               ]}>
-              <Text style={[styles.sectionNumber, { color: colors.primary }]}>
+              <Text
+                style={[
+                  styles.sectionNumber,
+                  {
+                    color: colors.primary,
+                  },
+                ]}>
                 {toArabicDigits(section.section)}
               </Text>
+
               <View style={styles.sectionCopy}>
                 <Text
-                  style={[styles.sectionTitle, { color: colors.foreground }]}>
+                  style={[
+                    styles.sectionTitle,
+                    {
+                      color: colors.foreground,
+                    },
+                  ]}>
                   {section.titleAr}
                 </Text>
+
                 <Text
                   style={[
                     styles.sectionMeta,
-                    { color: colors.mutedForeground },
+                    {
+                      color: colors.mutedForeground,
+                    },
                   ]}>
                   {toArabicDigits(section.hadiths.length)} حديث
                 </Text>
               </View>
+
               <Feather
                 name="chevron-left"
                 size={18}
@@ -652,39 +1143,53 @@ export default function HadithTab() {
           )}
         />
       ) : searchNumberActive ? (
-        /* نتيجة البحث بالرقم داخل الكتاب */
+        /**
+         * نتيجة البحث بالرقم.
+         */
         numberResultView
       ) : searchTextActive ? (
-        /* نتائج البحث النصي: hadeethenc (كل الكتب) + المخزون offline.
-           في وضع الكتب نتائج hadeethenc مخفية — النطاق المعلن موضوعي فقط. */
+        /**
+         * نتائج البحث النصي للمواضيع.
+         *
+         * مهم:
+         * showMissingGrade={false}
+         *
+         * لذلك لن تظهر:
+         * "درجة الحديث غير متوفرة"
+         */
         <FlatList
-          data={[
-            ...(mode === "topics" ? (searchQuery.data?.items ?? []) : []),
-            ...offlineHits,
-          ]}
+          data={[...(searchQuery.data?.items ?? []), ...offlineHits]}
           keyExtractor={(item, index) => `search-${item.id}-${index}`}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[
             styles.list,
-            { paddingBottom: bottomOverlap + spacing.md },
+            {
+              paddingBottom: bottomOverlap + spacing.md,
+            },
           ]}
           ListHeaderComponent={
             <View>
               {searchQuery.isPending ? <LoadingState /> : null}
+
               {searchQuery.isError ? (
                 <Text
                   style={[
                     styles.searchFeedbackText,
-                    { color: colors.mutedForeground },
+                    {
+                      color: colors.mutedForeground,
+                    },
                   ]}>
                   تعذر البحث الموضوعي — تُعرض النتائج المخزّنة offline فقط.
                 </Text>
               ) : null}
+
               {offlineHits.length > 0 ? (
                 <Text
                   style={[
                     styles.searchGroupTitle,
-                    { color: colors.mutedForeground },
+                    {
+                      color: colors.mutedForeground,
+                    },
                   ]}>
                   من المحتوى المخزّن offline (
                   {toArabicDigits(offlineHits.length)})
@@ -700,11 +1205,14 @@ export default function HadithTab() {
                 item.apiSource === "hadeethenc.com"
                   ? () =>
                       router.push(
-                        `/hadith-detail?hadithId=${encodeURIComponent(item.id)}`,
+                        `/hadith-detail?hadithId=${encodeURIComponent(
+                          item.id,
+                        )}`,
                       )
                   : undefined
               }
               colors={colors}
+              showMissingGrade={false}
             />
           )}
           ListEmptyComponent={
@@ -713,7 +1221,9 @@ export default function HadithTab() {
                 <Text
                   style={[
                     styles.searchFeedbackText,
-                    { color: colors.mutedForeground },
+                    {
+                      color: colors.mutedForeground,
+                    },
                   ]}>
                   لا نتائج لهذا البحث.
                 </Text>
@@ -722,14 +1232,18 @@ export default function HadithTab() {
           }
         />
       ) : openSection ? (
-        /* أحاديث باب مفتوح من الفهرس */
+        /**
+         * أحاديث الباب.
+         */
         <FlatList
           data={openSection.hadiths}
           keyExtractor={(hadith) => `sec-hadith-${hadith}`}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[
             styles.list,
-            { paddingBottom: bottomOverlap + spacing.md },
+            {
+              paddingBottom: bottomOverlap + spacing.md,
+            },
           ]}
           ListHeaderComponent={
             <Pressable
@@ -744,7 +1258,14 @@ export default function HadithTab() {
                 },
               ]}>
               <Feather name="arrow-up-right" size={15} color={colors.primary} />
-              <Text style={[styles.backToIndexText, { color: colors.primary }]}>
+
+              <Text
+                style={[
+                  styles.backToIndexText,
+                  {
+                    color: colors.primary,
+                  },
+                ]}>
                 الفهرس
               </Text>
             </Pressable>
@@ -759,9 +1280,12 @@ export default function HadithTab() {
           )}
         />
       ) : (
-        /* قائمة الأحاديث العادية بالصفحات */
+        /**
+         * القائمة العادية بالصفحات.
+         */
         <>
           {activeList.isPending ? <LoadingState /> : null}
+
           {activeList.isError ? (
             <ErrorState
               offline={isOfflineError(activeList.error)}
@@ -769,12 +1293,15 @@ export default function HadithTab() {
             />
           ) : (
             <FlatList
+              key={`hadith-list-${mode}-${selectedBook ?? selectedCategory ?? "none"}-${page}`}
               data={items}
               keyExtractor={(item, index) => `${item.id}-${index}`}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={[
                 styles.list,
-                { paddingBottom: bottomOverlap + spacing.md },
+                {
+                  paddingBottom: bottomOverlap + spacing.md,
+                },
               ]}
               renderItem={({ item }) => (
                 <HadithCard
@@ -784,58 +1311,53 @@ export default function HadithTab() {
                     item.apiSource === "hadeethenc.com"
                       ? () =>
                           router.push(
-                            `/hadith-detail?hadithId=${encodeURIComponent(item.id)}`,
+                            `/hadith-detail?hadithId=${encodeURIComponent(
+                              item.id,
+                            )}`,
                           )
-                      : undefined
+                      : selectedBook
+                        ? () =>
+                            router.push(
+                              `/hadith-detail?book=${encodeURIComponent(
+                                selectedBook,
+                              )}&number=${encodeURIComponent(item.reference)}`,
+                            )
+                        : undefined
                   }
                   colors={colors}
+                  /**
+                   * هنا أهم إصلاح:
+                   *
+                   * الكتب:
+                   * showMissingGrade = true
+                   *
+                   * المواضيع:
+                   * showMissingGrade = false
+                   */
+                  showMissingGrade={mode === "books"}
                 />
               )}
-              ListFooterComponent={
-                <View style={styles.pager}>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="الصفحة السابقة"
-                    disabled={page <= 1 || activeList.isPending}
-                    onPress={() => setPage((value) => Math.max(value - 1, 1))}
-                    style={({ pressed }) => [
-                      styles.pagerButton,
-                      {
-                        backgroundColor: colors.secondary,
-                        opacity: page <= 1 ? 0.4 : pressed ? 0.7 : 1,
-                      },
-                    ]}>
-                    <Feather
-                      name="chevron-right"
-                      size={17}
-                      color={colors.primary}
-                    />
-                    <Text style={[styles.pagerText, { color: colors.primary }]}>
-                      السابق
+              ListHeaderComponent={
+                <View>
+                  {activeList.isFetching && !activeList.isPending ? (
+                    <Text
+                      style={[styles.refreshingText, { color: colors.mutedForeground }]}>
+                      جارٍ تحميل الصفحة {toArabicDigits(page)}…
                     </Text>
-                  </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="الصفحة التالية"
-                    disabled={!hasMore || activeList.isPending}
-                    onPress={() => setPage((value) => value + 1)}
-                    style={({ pressed }) => [
-                      styles.pagerButton,
-                      {
-                        backgroundColor: colors.secondary,
-                        opacity: !hasMore ? 0.4 : pressed ? 0.7 : 1,
-                      },
-                    ]}>
-                    <Text style={[styles.pagerText, { color: colors.primary }]}>
-                      التالي
-                    </Text>
-                    <Feather
-                      name="chevron-left"
-                      size={17}
-                      color={colors.primary}
-                    />
-                  </Pressable>
+                  ) : null}
+                  {renderPager()}
                 </View>
+              }
+              ListFooterComponent={renderPager()}
+              ListEmptyComponent={
+                activeList.isPending ? null : (
+                  <View style={styles.searchFeedback}>
+                    <Text
+                      style={[styles.searchFeedbackText, { color: colors.mutedForeground }]}>
+                      لا توجد أحاديث في هذه الصفحة.
+                    </Text>
+                  </View>
+                )
               }
             />
           )}
@@ -845,7 +1367,11 @@ export default function HadithTab() {
   );
 }
 
-/** صف حديث واحد داخل باب مفتوح — يجلب الحديث برقمه ويستخدم HadithCard نفسها. */
+/**
+ * صف حديث واحد داخل باب مفتوح — يُجلب عبر useGetHadithByNumber (مخزَّن في
+ * React Query: البطاقة وشاشة التفصيل تشاركان نفس الكاش، والصفوف المرئية فقط
+ * تُنشّط بفضل FlatList virtualization).
+ */
 function SectionHadithRow({
   bookSlug,
   hadithNumber,
@@ -857,26 +1383,31 @@ function SectionHadithRow({
   bookTitle: string;
   colors: ReturnType<typeof useColors>;
 }) {
-  const [item, setItem] = useState<HadithItem | null | undefined>(undefined);
-  useEffect(() => {
-    let active = true;
-    setItem(undefined);
-    fetchHadithByNumber(bookSlug, hadithNumber)
-      .then((fetched) => {
-        if (active) setItem(fetched);
-      })
-      .catch(() => {
-        if (active) setItem(null);
-      });
-    return () => {
-      active = false;
-    };
-  }, [bookSlug, hadithNumber]);
+  const router = useRouter();
+
+  const query = useGetHadithByNumber(bookSlug, hadithNumber);
+  const item = query.data;
 
   if (item === undefined || item === null) {
-    return null; // فشل جلب حديث واحد لا يعطل بقية الباب
+    return null;
   }
-  return <HadithCard item={item} bookTitle={bookTitle} colors={colors} />;
+
+  return (
+    <HadithCard
+      item={item}
+      bookTitle={bookTitle}
+      onPress={() =>
+        router.push(
+          `/hadith-detail?book=${encodeURIComponent(
+            bookSlug,
+          )}&number=${encodeURIComponent(item.reference)}`,
+        )
+      }
+      colors={colors}
+      showMissingGrade={true}
+      bookSlug={bookSlug}
+    />
+  );
 }
 
 const styles = StyleSheet.create({
@@ -886,26 +1417,45 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: spacing.md,
   },
+
   modeTab: {
     borderRadius: radii.pill,
     paddingHorizontal: spacing.md,
     paddingVertical: 8,
   },
-  modeTabText: { fontSize: typography.bodySmall, fontWeight: "700" },
-  list: { paddingBottom: 40 },
+
+  modeTabText: {
+    fontSize: typography.bodySmall,
+    fontWeight: "700",
+  },
+
+  list: {
+    paddingBottom: 40,
+  },
+
   listHeader: {
     alignItems: "center",
     flexDirection: "row-reverse",
-    gap: spacing.md,
+    gap: spacing.sm,
     marginBottom: spacing.md,
   },
-  titleCopy: { alignItems: "flex-end", flex: 1 },
+
+  titleCopy: {
+    alignItems: "flex-end",
+    flex: 1,
+  },
+
   screenTitle: {
     fontSize: typography.h1,
     fontWeight: "700",
     textAlign: "right",
   },
-  screenMeta: { fontSize: typography.caption, marginTop: 2 },
+
+  screenMeta: {
+    fontSize: typography.caption,
+    marginTop: 2,
+  },
+
   row: {
     alignItems: "center",
     borderRadius: radii.md,
@@ -915,6 +1465,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     padding: spacing.md,
   },
+
   rowIcon: {
     alignItems: "center",
     borderRadius: radii.sm,
@@ -922,13 +1473,23 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     width: 42,
   },
-  rowCopy: { alignItems: "flex-end", flex: 1 },
+
+  rowCopy: {
+    alignItems: "flex-end",
+    flex: 1,
+  },
+
   rowTitle: {
     fontSize: typography.body,
     fontWeight: "700",
     textAlign: "right",
   },
-  rowMeta: { fontSize: typography.caption, marginTop: 2 },
+
+  rowMeta: {
+    fontSize: typography.caption,
+    marginTop: 2,
+  },
+
   indexButton: {
     alignItems: "center",
     borderRadius: radii.pill,
@@ -937,8 +1498,51 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 9,
   },
-  indexButtonText: { fontSize: typography.caption, fontWeight: "700" },
-  searchWrap: { marginBottom: spacing.sm },
+
+  indexButtonText: {
+    fontSize: typography.caption,
+    fontWeight: "700",
+  },
+
+  /**
+   * زر المزيد.
+   */
+  moreButton: {
+    alignItems: "center",
+    borderRadius: radii.pill,
+    height: 38,
+    justifyContent: "center",
+    width: 38,
+  },
+
+  moreMenu: {
+    alignSelf: "flex-end",
+    borderRadius: radii.md,
+    borderWidth: 1,
+    marginBottom: spacing.sm,
+    minWidth: 180,
+    overflow: "hidden",
+  },
+
+  moreMenuItem: {
+    alignItems: "center",
+    flexDirection: "row-reverse",
+    gap: spacing.sm,
+    justifyContent: "flex-start",
+    paddingHorizontal: spacing.md,
+    paddingVertical: 12,
+  },
+
+  moreMenuText: {
+    fontSize: typography.bodySmall,
+    fontWeight: "600",
+    textAlign: "right",
+  },
+
+  searchWrap: {
+    marginBottom: spacing.sm,
+  },
+
   searchBar: {
     alignItems: "center",
     borderRadius: radii.sm,
@@ -947,31 +1551,47 @@ const styles = StyleSheet.create({
     minHeight: 48,
     paddingHorizontal: spacing.md,
   },
+
   searchInput: {
     flex: 1,
     fontSize: typography.body,
     textAlign: "right",
     paddingVertical: 0,
   },
+
   searchKindToggle: {
     borderRadius: radii.pill,
     paddingHorizontal: 10,
     paddingVertical: 5,
   },
-  searchKindText: { fontSize: typography.caption, fontWeight: "700" },
+
+  searchKindText: {
+    fontSize: typography.caption,
+    fontWeight: "700",
+  },
+
   searchScope: {
     fontSize: typography.caption,
     marginTop: 4,
     textAlign: "right",
   },
+
   searchGroupTitle: {
     fontSize: typography.caption,
     fontWeight: "700",
     marginTop: spacing.sm,
     textAlign: "right",
   },
-  searchFeedback: { padding: spacing.md },
-  searchFeedbackText: { fontSize: typography.bodySmall, textAlign: "right" },
+
+  searchFeedback: {
+    padding: spacing.md,
+  },
+
+  searchFeedbackText: {
+    fontSize: typography.bodySmall,
+    textAlign: "right",
+  },
+
   backToIndex: {
     alignSelf: "flex-start",
     alignItems: "center",
@@ -982,7 +1602,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
   },
-  backToIndexText: { fontSize: typography.caption, fontWeight: "700" },
+
+  backToIndexText: {
+    fontSize: typography.caption,
+    fontWeight: "700",
+  },
+
   sectionRow: {
     alignItems: "center",
     borderRadius: radii.md,
@@ -992,36 +1617,50 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     padding: spacing.md,
   },
+
   sectionNumber: {
     fontSize: typography.bodySmall,
     fontWeight: "700",
     minWidth: 26,
     textAlign: "center",
   },
-  sectionCopy: { alignItems: "flex-end", flex: 1 },
+
+  sectionCopy: {
+    alignItems: "flex-end",
+    flex: 1,
+  },
+
   sectionTitle: {
     fontSize: typography.body,
     fontWeight: "700",
     textAlign: "right",
   },
-  sectionMeta: { fontSize: typography.caption, marginTop: 2 },
+
+  sectionMeta: {
+    fontSize: typography.caption,
+    marginTop: 2,
+  },
+
   hadithCard: {
     borderRadius: radii.md,
     borderWidth: 1,
     marginBottom: spacing.sm,
     padding: spacing.md,
   },
+
   hadithTop: {
     flexDirection: "row-reverse",
     alignItems: "flex-start",
     gap: spacing.sm,
   },
+
   hadithText: {
     flex: 1,
     fontSize: typography.body,
     lineHeight: 28,
     textAlign: "right",
   },
+
   hadithMetaRow: {
     alignItems: "center",
     flexDirection: "row-reverse",
@@ -1029,26 +1668,47 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     marginTop: spacing.xs,
   },
-  hadithMetaText: { fontSize: typography.caption },
-  detailHint: { fontSize: typography.caption, fontWeight: "700" },
+
+  hadithMetaText: {
+    fontSize: typography.caption,
+  },
+
+  detailHint: {
+    fontSize: typography.caption,
+    fontWeight: "700",
+  },
+
   hadithFooter: {
     alignItems: "center",
     flexDirection: "row-reverse",
     gap: 5,
     marginTop: spacing.sm,
   },
+
   hadithSource: {
     flex: 1,
     fontSize: typography.caption,
     fontWeight: "600",
     textAlign: "right",
   },
+
+  /**
+   * Pagination.
+   */
+  refreshingText: {
+    fontSize: typography.caption,
+    marginBottom: spacing.xs,
+    textAlign: "center",
+  },
+
   pager: {
+    alignItems: "center",
     flexDirection: "row-reverse",
     gap: spacing.sm,
     justifyContent: "center",
     paddingVertical: spacing.lg,
   },
+
   pagerButton: {
     alignItems: "center",
     borderRadius: radii.pill,
@@ -1057,5 +1717,38 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: 10,
   },
-  pagerText: { fontSize: typography.bodySmall, fontWeight: "700" },
+
+  pagerText: {
+    fontSize: typography.bodySmall,
+    fontWeight: "700",
+  },
+
+  /**
+   * رقم الصفحة الحالية.
+   */
+  pageIndicator: {
+    alignItems: "center",
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    height: 38,
+    justifyContent: "center",
+    minWidth: 38,
+    paddingHorizontal: 10,
+  },
+
+  pageIndicatorText: {
+    fontSize: typography.bodySmall,
+    fontWeight: "700",
+  },
+
+  /**
+   * السهم الجديد للانتقال للصفحة التالية.
+   */
+  nextPageArrow: {
+    alignItems: "center",
+    borderRadius: radii.pill,
+    height: 42,
+    justifyContent: "center",
+    width: 42,
+  },
 });

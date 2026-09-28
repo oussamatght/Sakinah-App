@@ -1,6 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useColors } from '@/hooks/useColors';
+import { useHadithGrade, type HadithItem } from '@/lib/api';
 
 /**
  * شارة درجة الحديث — لون يعكس الدرجة كما طلب المستخدم:
@@ -86,3 +87,22 @@ const styles = StyleSheet.create({
   },
   text: { fontSize: 11, fontWeight: '700' },
 });
+
+/**
+ * شارة درجة لعنصر قائمة يحمّل درجته **كسولًا** (useHadithGrade): القائمة
+ * تظهر فورًا بلا إثراء محبوس، والبطاقات المرئية فقط (FlatList virtualization)
+ * تطلب درجة كل حديث ثم تُحفظ في كاش React Query. لا تُنشئ درجة أبدًا —
+ * بلا درجة من المصدر = البادج "غير متوفرة" أو مخفية حسب showMissing.
+ */
+export function ItemGrade({
+  item,
+  bookSlug,
+  showMissing = false,
+}: {
+  item?: HadithItem | null;
+  bookSlug?: string | null;
+  showMissing?: boolean;
+}) {
+  const grade = useHadithGrade(item, bookSlug);
+  return <GradeBadge grade={grade} showMissing={showMissing} />;
+}

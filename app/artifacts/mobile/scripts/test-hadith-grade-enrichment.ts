@@ -3,12 +3,14 @@
  *  - 5 أحاديث من الكتب الخمسة المدرَّجة: الدرجة تصل حرفيًا (إنجليزي) أو undefined
  *  - bukhari/muslim: بلا درجة (المصدر لا يدرجهما) — لا اختراع
  *  - رقم خارج النطاق → undefined بأمان
- *  - القائمة الكاملة من fetchBookHadiths: النص/الكتاب/المرجع لا تتغير،
- *    والدرجة إما undefined أو قيمة حرفية غير فارغة وغير "-"
+ *  - fetchBookHadiths (المسار الإنتاجي للقوائم): عناصر خام سليمة بلا درجة —
+ *    الدرجات تُحمَّل كسولًا (useHadithGrade) المسار الحرفي نفسه الذي يمر به
+ *    fetchHadithByNumber في الاعتماد أدناه.
+ *  - fetchHadithByNumber (شاشة التفصيل): يثري العنصر الواحد وتصل الدرجة حرفية.
  *
  * تشغيل: npx tsx scripts/test-hadith-grade-enrichment.ts
  */
-import { fetchBookHadiths } from "../lib/api/hadith";
+import { fetchBookHadiths, fetchHadithByNumber } from "../lib/api/hadith";
 import { fetchGradeFromFawaz } from "../lib/api/hadithGradeEnrichment";
 
 let passed = 0;
@@ -63,21 +65,27 @@ async function main() {
   check("apiSource ما زال hadis-api-id (المصدر الأساسي لم يُستبدل)", page.items.every((i) => i.apiSource === "hadis-api-id"));
   check("النص لم يُمس (غير فارغ)", page.items.every((i) => i.text.length > 0));
   check("reference يطابق رقم الحديث", page.items.every((i) => i.reference === String(Math.abs(Number(i.id.split(":")[1])))) || page.items.every((i) => Number(i.reference) >= 1));
-  const graded = page.items.filter((i) => typeof i.grade === "string");
   check(
-    "كل درجة عربية (أو تخريجية بأرقام) وغير فارغة/غير \"-\"",
-    graded.every(
-      (i) =>
-        i.grade!.trim().length > 0 &&
-        i.grade!.trim() !== "-" &&
-        (/^[\u0600-\u06FF]/.test(i.grade!.trim()) || /\d/.test(i.grade!)),
-    ),
-    `graded=${graded.length}/10`,
+    "القائمة خام (صفر درجات) — الإثراء كسول في البطاقات (useHadithGrade)",
+    page.items.every((i) => i.grade === undefined),
   );
-  console.log("  درجات الصفحة:", page.items.map((i) => `${i.reference}:${i.grade ?? "—"}`).join(" | "));
 
-  const bukhariPage = await fetchBookHadiths("bukhari", 1, 5);
-  check("بخاري كامل: صفر درجات (لا اختراع)", bukhariPage.items.every((i) => i.grade === undefined));
+  console.log("=== 5) شاشة التفصيل/البطاقات: fetchHadithByNumber يثري العنصر الواحد حرفيًا ===");
+  const single = await fetchHadithByNumber("tirmidzi", 5);
+  const isArabicOrDigits =
+    typeof single.grade === "string" &&
+    single.grade.trim().length > 0 &&
+    single.grade.trim() !== "-" &&
+    (/^[\u0600-\u06FF]/.test(single.grade.trim()) || /\d/.test(single.grade));
+  check("tirmidzi#5 → درجة حرفية عربية", isArabicOrDigits, single.grade ?? "(undefined)");
+  check(
+    "النص/الكتاب/المرجع سليمة في المسار الأحادي",
+    single.text.length > 0 && single.book.length > 0 && Number(single.reference) >= 1,
+    `${single.reference}:${single.book}`,
+  );
+
+  const bukhariSingle = await fetchHadithByNumber("bukhari", 1);
+  check("بخاري كامل: صفر درجات (لا اختراع)", bukhariSingle.grade === undefined);
 
   console.log(`\nENRICHMENT LIVE TEST: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);

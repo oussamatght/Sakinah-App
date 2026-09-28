@@ -1,137 +1,292 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   FlatList,
-  RefreshControl,
+  Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
-import { useRouter } from "expo-router";
-import { Ionicons } from "@expo/vector-icons";
 
-import BookCard from "../../components/BookCard";
-import BookEmptyState from "../../components/BookEmptyState";
-import BookSearchBar from "../../components/BookSearchBar";
-import { useSearchIslamicBooks } from "../../hooks/useIslamicBooks";
-import type { IslamicBook } from "../../types/islamicBooksTypes";
+import { useRouter } from "expo-router";
+import { Feather } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+
+import {
+  useLibraryBookList,
+  useLibraryCategories,
+} from "@/hooks/useIslamicBooks";
+import {
+  AppHeader,
+  EmptyState,
+  ErrorState,
+  isOfflineError,
+  LoadingState,
+  SearchBar,
+} from "@/components/ui";
+import BookCard from "@/components/BookCard";
+import { radii, spacing, typography } from "@/constants/tokens";
+import { useColors } from "@/hooks/useColors";
+import type { IslamicBook } from "@/lib/books/types";
 
 const PAGE_SIZE = 20;
+const TAB_BAR_HEIGHT = 84;
+
+function toArabicDigits(value: number | string): string {
+  return String(value).replace(/[0-9]/g, (digit) => "٠١٢٣٤٥٦٧٨٩"[Number(digit)]);
+}
 
 export default function BooksTab() {
+  const colors = useColors();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+
+  const bottomOverlap = TAB_BAR_HEIGHT + insets.bottom;
 
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+
+  const categoriesQuery = useLibraryCategories("islamhouse");
+  const categories = useMemo(
+    () => (categoriesQuery.data ?? []).filter((category) => !category.parentId),
+    [categoriesQuery.data],
+  );
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setQuery(search.trim());
-    }, 350);
-
+    const timer = setTimeout(() => setQuery(search.trim()), 350);
     return () => clearTimeout(timer);
   }, [search]);
 
-  const { data, isLoading, isFetching, isError, error, refetch } =
-    useSearchIslamicBooks(query, 1, PAGE_SIZE);
+  useEffect(() => {
+    setPage(1);
+  }, [query, selectedCategory]);
 
-  const books = useMemo<IslamicBook[]>(() => data?.items ?? [], [data]);
+  const searching = query.length > 0;
+
+  const listQuery = useLibraryBookList({
+    query,
+    source: "islamhouse",
+    categoryId: searching ? undefined : (selectedCategory ?? undefined),
+    page,
+    perPage: PAGE_SIZE,
+  });
+
+  const books = listQuery.data?.items ?? [];
+
+  const reportedTotal = Number(listQuery.data?.total ?? 0);
+  const reportedPerPage = Math.max(1, Number(listQuery.data?.perPage ?? PAGE_SIZE));
+  const reportedTotalPages = Math.max(
+    0,
+    Number((listQuery.data as { totalPages?: number } | undefined)?.totalPages ?? 0),
+  );
+  const totalPages =
+    reportedTotalPages > 0
+      ? reportedTotalPages
+      : reportedTotal > 0
+        ? Math.max(1, Math.ceil(reportedTotal / reportedPerPage))
+        : Math.max(1, page);
+
+  const explicitHasMore = listQuery.data?.hasMore;
+  const inferredHasMore = books.length >= reportedPerPage;
+  const hasMore =
+    explicitHasMore === true
+      ? true
+      : explicitHasMore === false
+        ? false
+        : page < totalPages || inferredHasMore;
+
+  const canGoPrevious = page > 1 && !listQuery.isPending;
+  const canGoNext = !listQuery.isPending && !listQuery.isFetching && hasMore;
 
   const openBook = (book: IslamicBook) => {
     router.push({
       pathname: "/book-details",
       params: {
-        id: book.id,
         source: book.source,
-        rawId: String(book.rawId),
+        rawId: book.rawId,
         title: book.title,
+        author: book.author ?? "",
       },
     });
   };
 
+  const renderPager = () => (
+    <View style={styles.pager}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="الصفحة السابقة"
+        disabled={!canGoPrevious}
+        onPress={() => setPage((value) => Math.max(value - 1, 1))}
+        style={({ pressed }) => [
+          styles.pagerButton,
+          {
+            backgroundColor: colors.secondary,
+            opacity: !canGoPrevious ? 0.4 : pressed ? 0.7 : 1,
+          },
+        ]}>
+        <Feather name="chevron-right" size={17} color={colors.primary} />
+        <Text style={[styles.pagerText, { color: colors.primary }]}>السابق</Text>
+      </Pressable>
+
+      <View
+        style={[
+          styles.pageIndicator,
+          { backgroundColor: colors.card, borderColor: colors.border },
+        ]}>
+        <Text style={[styles.pageIndicatorText, { color: colors.foreground }]}>
+          {toArabicDigits(page)}
+        </Text>
+      </View>
+
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="الصفحة التالية"
+        disabled={!canGoNext}
+        onPress={() => setPage((value) => value + 1)}
+        style={({ pressed }) => [
+          styles.pagerButton,
+          {
+            backgroundColor: colors.secondary,
+            opacity: !canGoNext ? 0.4 : pressed ? 0.7 : 1,
+          },
+        ]}>
+        <Text style={[styles.pagerText, { color: colors.primary }]}>التالي</Text>
+        <Feather name="chevron-left" size={17} color={colors.primary} />
+      </Pressable>
+    </View>
+  );
+
+  const renderCategories = () => (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.categoryRow}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ selected: selectedCategory === null }}
+        onPress={() => setSelectedCategory(null)}
+        style={[
+          styles.categoryChip,
+          selectedCategory === null && { backgroundColor: colors.primary },
+        ]}>
+        <Text
+          style={[
+            styles.categoryChipText,
+            {
+              color:
+                selectedCategory === null
+                  ? colors.primaryForeground
+                  : colors.mutedForeground,
+            },
+          ]}>
+          الكل
+        </Text>
+      </Pressable>
+
+      {categories.map((category) => {
+        const selected = selectedCategory === category.id;
+        return (
+          <Pressable
+            key={category.id}
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            accessibilityLabel={`تصفح ${category.title}`}
+            onPress={() => setSelectedCategory(category.id)}
+            style={[
+              styles.categoryChip,
+              selected && { backgroundColor: colors.primary },
+            ]}>
+            <Text
+              style={[
+                styles.categoryChipText,
+                {
+                  color: selected
+                    ? colors.primaryForeground
+                    : colors.mutedForeground,
+                },
+              ]}>
+              {category.title}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </ScrollView>
+  );
+
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { backgroundColor: colors.background }]}>
       <FlatList
         data={books}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <BookCard book={item} onPress={() => openBook(item)} />
         )}
+        showsVerticalScrollIndicator={false}
         contentContainerStyle={[
           styles.listContent,
-          books.length === 0 && styles.emptyList,
+          { paddingBottom: bottomOverlap + spacing.md },
         ]}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={isFetching && !isLoading}
-            onRefresh={refetch}
-          />
-        }
         ListHeaderComponent={
           <View>
-            <View style={styles.header}>
-              <View style={styles.headerIcon}>
-                <Ionicons name="library-outline" size={25} color="#6D4C41" />
-              </View>
+            <AppHeader eyebrow="من المكتبة الإسلامية" title="الكتب" />
 
-              <View style={styles.headerText}>
-                <Text style={styles.title}>الكتب الإسلامية</Text>
-                <Text style={styles.subtitle}>كتب من تراث وإسلام هاوس</Text>
-              </View>
-            </View>
-
-            <BookSearchBar
+            <SearchBar
+              placeholder={
+                searching
+                  ? "ابحث في تراث وإسلام هاوس…"
+                  : "ابحث في شجرة الكتب…"
+              }
               value={search}
               onChangeText={setSearch}
-              onClear={() => setSearch("")}
             />
 
-            <View style={styles.sourceRow}>
-              <View style={styles.sourcePill}>
-                <Text style={styles.sourceText}>تراث</Text>
-              </View>
+            <Text style={[styles.scopeNote, { color: colors.mutedForeground }]}>
+              {searching
+                ? "البحث يشمل مكتبة تراث ومكتبة إسلام هاوس."
+                : "التصفح عبر تصنيفات إسلام هاوس (تراث لا يقدم نقطة تصفح قائمة)."}
+            </Text>
 
-              <View style={styles.sourcePillBlue}>
-                <Text style={styles.sourceText}>إسلام هاوس</Text>
-              </View>
+            {!searching ? (
+              <>
+                {categoriesQuery.isPending ? null : null}
+                {renderCategories()}
+                {categoriesQuery.isError ? (
+                  <Text
+                    style={[styles.scopeNote, { color: colors.mutedForeground }]}>
+                    تعذر تحميل التصنيفات — يمكنك تصفح قائمة الكتب مباشرة.
+                  </Text>
+                ) : null}
+              </>
+            ) : null}
 
-              <Text style={styles.resultText}>
-                {query ? `${books.length} نتيجة` : `${books.length} كتاب`}
-              </Text>
-            </View>
+            {listQuery.isError ? (
+              <ErrorState
+                offline={isOfflineError(listQuery.error)}
+                onRetry={() => void listQuery.refetch()}
+              />
+            ) : null}
 
-            {isError && (
-              <View style={styles.errorBox}>
-                <Ionicons name="warning-outline" size={20} color="#A94442" />
-
-                <Text style={styles.errorText}>
-                  حدث خطأ أثناء تحميل الكتب.
-                  {"\n"}
-                  {error instanceof Error
-                    ? error.message
-                    : "تحقق من اتصال الإنترنت."}
-                </Text>
-              </View>
-            )}
+            {!listQuery.isPending && books.length > 0 ? renderPager() : null}
           </View>
         }
         ListEmptyComponent={
-          isLoading ? (
-            <View style={styles.loading}>
-              <ActivityIndicator size="large" />
-              <Text style={styles.loadingText}>جاري تحميل الكتب...</Text>
-            </View>
-          ) : (
-            <BookEmptyState
-              title={query ? "لم نجد نتائج" : "لا توجد كتب"}
+          listQuery.isPending ? (
+            <LoadingState label="جاري تحميل الكتب…" />
+          ) : listQuery.isError ? null : (
+            <EmptyState
+              title={searching ? "لم نجد نتائج" : "لا توجد كتب"}
               message={
-                query
-                  ? "جرّب عنوان كتاب أو اسم مؤلف مختلف."
-                  : "لم يتم العثور على كتب من مصدر إسلام هاوس."
+                searching
+                  ? "جرّب عنوانًا أو اسم مؤلف مختلفًا."
+                  : "لم يقدم هذا التصنيف كتبًا من إسلام هاوس."
               }
             />
           )
+        }
+        ListFooterComponent={
+          !listQuery.isPending && books.length > 0 ? renderPager() : null
         }
       />
     </View>
@@ -141,97 +296,60 @@ export default function BooksTab() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: "#FAFAFA",
   },
   listContent: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 30,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
   },
-  emptyList: {
-    flexGrow: 1,
-  },
-  header: {
-    flexDirection: "row-reverse",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  headerIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 16,
-    backgroundColor: "#F1E7E1",
-    alignItems: "center",
-    justifyContent: "center",
-    marginLeft: 12,
-  },
-  headerText: {
-    flex: 1,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: "#202124",
+  scopeNote: {
+    fontSize: typography.caption,
+    marginTop: spacing.xs,
     textAlign: "right",
   },
-  subtitle: {
-    fontSize: 13,
-    color: "#777",
-    marginTop: 3,
-    textAlign: "right",
-  },
-  sourceRow: {
+  categoryRow: {
     flexDirection: "row-reverse",
-    alignItems: "center",
-    gap: 7,
-    marginVertical: 14,
+    gap: spacing.sm,
+    paddingVertical: spacing.sm,
   },
-  sourcePill: {
-    backgroundColor: "#F1E7E1",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+  categoryChip: {
+    borderRadius: radii.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 8,
   },
-  sourcePillBlue: {
-    backgroundColor: "#E7F0FA",
-    borderRadius: 999,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-  },
-  sourceText: {
-    fontSize: 11,
+  categoryChipText: {
+    fontSize: typography.bodySmall,
     fontWeight: "700",
-    color: "#555",
   },
-  resultText: {
-    flex: 1,
-    textAlign: "left",
-    color: "#888",
-    fontSize: 12,
-  },
-  errorBox: {
+  pager: {
+    alignItems: "center",
     flexDirection: "row-reverse",
+    gap: spacing.sm,
+    justifyContent: "center",
+    paddingVertical: spacing.lg,
+  },
+  pagerButton: {
     alignItems: "center",
-    gap: 8,
-    backgroundColor: "#FDECEC",
-    borderRadius: 12,
-    padding: 11,
-    marginBottom: 12,
+    borderRadius: radii.pill,
+    flexDirection: "row-reverse",
+    gap: 5,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 10,
   },
-  errorText: {
-    flex: 1,
-    color: "#8A3A38",
-    fontSize: 12,
-    lineHeight: 19,
-    textAlign: "right",
+  pagerText: {
+    fontSize: typography.bodySmall,
+    fontWeight: "700",
   },
-  loading: {
+  pageIndicator: {
     alignItems: "center",
-    paddingTop: 60,
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    height: 38,
+    justifyContent: "center",
+    minWidth: 38,
+    paddingHorizontal: 10,
   },
-  loadingText: {
-    marginTop: 10,
-    color: "#777",
-    fontSize: 14,
+  pageIndicatorText: {
+    fontSize: typography.bodySmall,
+    fontWeight: "700",
   },
 });

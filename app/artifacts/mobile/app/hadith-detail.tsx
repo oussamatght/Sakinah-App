@@ -2,7 +2,7 @@ import React from "react";
 import { ScrollView, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import { useGetHadithDetail } from "@/lib/api";
+import { useGetHadithByNumber, useGetHadithDetail } from "@/lib/api";
 import {
   AppHeader,
   ErrorState,
@@ -17,23 +17,36 @@ import { radii, spacing, typography } from "@/constants/tokens";
 import { useColors } from "@/hooks/useColors";
 
 /**
- * تفصيل الحديث — المسار الوحيد الذي تُعرض فيه الدرجة كما أعطاها المصدر:
- *   - HadeethEnc /hadeeths/one يقدم grade/attribution/explanation/reference
- *     (مُتحقق حيًا). الدرجة تُعرض حرفيًا بلا أي تحوير — GradeBadge لا يستنتج.
- *   - hadis-api-id (الكتب التسعة) لا يقدم تفصيلًا أصلًا (قوائم فقط بالحقول
- *     number/arab/id) — لذا بطاقات الكتب لا تفتح هذا التفصيل إطلاقًا: كل ما
- *     يقدمه المصدر معروض بالفعل في بطاقة القائمة.
- *   - إن لم يقدم المصدر درجة، GradeBadge (showMissing) يعرض «درجة الحديث غير
- *     متوفرة» — غياب الدرجة ليس خطأ.
+ * تفصيل الحديث — مسار واحد يخدم مصدري الأحاديث معًا:
+ *   - HadeethEnc /hadeeths/one (hadithId) — يقدم grade/attribution/
+ *     explanation/reference (مُتحقق حيًا).
+ *   - كتاب من hadis-api-id (book + number) — يُفتح بنفس المفتاح الذي تقدمه
+ *     القائمة (رقم الحديث) عبر نفس مسار الإنتاج fetchHadithByNumber، فتُعرض
+ *     الدرجة الحرفية نفسها (إثراء fawaz) للكتب الخمسة أو «غير متوفرة» إن لم
+ *     يقدم المصدر درجة — لا استنتاج.
+ * الدرجة تُعرض حرفيًا بلا أي تحوير — GradeBadge لا يستنتج. الشرح يُعرض إن
+ * وفره المصدر فقط (كان مصدر الكتب لا يقدمه).
  */
 
 export default function HadithDetail() {
   const colors = useColors();
   const router = useRouter();
-  const params = useLocalSearchParams<{ id?: string; hadithId?: string }>();
+  const params = useLocalSearchParams<{
+    id?: string;
+    hadithId?: string;
+    book?: string;
+    number?: string;
+  }>();
   const hadithId = params.hadithId ?? params.id ?? null;
+  const book = params.book ?? null;
+  const number = params.number ? Number.parseInt(params.number, 10) : null;
   const detailQuery = useGetHadithDetail(hadithId);
-  const item = detailQuery.data;
+  const bookQuery = useGetHadithByNumber(
+    book && number && Number.isInteger(number) ? book : null,
+    number && Number.isInteger(number) ? number : null,
+  );
+  const query = book ? bookQuery : detailQuery;
+  const item = query.data;
 
   return (
     <Screen scroll={false}>
@@ -49,11 +62,11 @@ export default function HadithDetail() {
         </View>
       </View>
 
-      {detailQuery.isPending ? <LoadingState /> : null}
-      {detailQuery.isError ? (
+      {query.isPending ? <LoadingState /> : null}
+      {query.isError ? (
         <ErrorState
-          offline={isOfflineError(detailQuery.error)}
-          onRetry={() => void detailQuery.refetch()}
+          offline={isOfflineError(query.error)}
+          onRetry={() => void query.refetch()}
         />
       ) : null}
 
@@ -85,7 +98,11 @@ export default function HadithDetail() {
                 الراوي: {item.attribution}
               </Text>
             ) : null}
-            {item.reference ? (
+            {item.apiSource === "hadis-api-id" ? (
+              <Text style={[styles.metaLine, { color: colors.mutedForeground }]}>
+                {item.book} — رقم الحديث {item.reference}
+              </Text>
+            ) : item.reference ? (
               <Text style={[styles.metaLine, { color: colors.mutedForeground }]}>
                 المصدر: {item.reference}
               </Text>

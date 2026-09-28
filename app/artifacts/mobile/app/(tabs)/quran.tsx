@@ -3,6 +3,7 @@ import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useGetQuranChapterPages, useGetQuranSurahs } from '@/lib/api';
+import { searchLocalQuranVerses, type LocalQuranVerseHit } from '@/lib/offline/quranDb';
 import { AppHeader, ErrorState, isOfflineError, LoadingState, SearchBar, Screen } from '@/components/ui';
 import { radii, spacing, typography } from '@/constants/tokens';
 import { useColors } from '@/hooks/useColors';
@@ -53,10 +54,18 @@ export default function QuranScreen() {
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<TabKey>('surahs');
 
+  const toArabicDigits = (n: number) => String(n).replace(/\d/g, (d) => '٠١٢٣٤٥٦٧٨٩'[Number(d)]);
+
   const surahsQuery = useGetQuranSurahs();
   const chapterPagesQuery = useGetQuranChapterPages();
   const surahs = surahsQuery.data ?? [];
   const chapterPages = chapterPagesQuery.data ?? [];
+
+  // بحث مباشر في نص الآيات المحمَّلة على الجهاز (يحتاج تنزيلًا مسبقًا).
+  const verseHits = useMemo(
+    () => (query.trim().length >= 2 ? searchLocalQuranVerses(query.trim(), 60) : []),
+    [query],
+  );
 
   const filtered = useMemo(
     () =>
@@ -126,6 +135,18 @@ export default function QuranScreen() {
     });
   };
 
+  /** فتح آية من نتائج البحث في الآيات: القارئ يفتح مباشرة عند تلك الآية. */
+  const openVerseHit = (hit: LocalQuranVerseHit) => {
+    router.push({
+      pathname: '/quran-reader',
+      params: {
+        surahId: String(hit.surahId),
+        surah: hit.surah,
+        ayah: String(hit.ayah),
+      },
+    });
+  };
+
   const tabs: Array<{ key: TabKey; label: string }> = [
     { key: 'surahs', label: 'السور' },
     { key: 'juz', label: 'الأجزاء' },
@@ -141,7 +162,7 @@ export default function QuranScreen() {
         actionLabel="تنزيل القرآن للقراءة بدون إنترنت"
         onAction={() => router.push('/quran-download')}
       />
-      <SearchBar placeholder="ابحث في القرآن..." value={query} onChangeText={setQuery} />
+      <SearchBar placeholder="ابحث عن سورة أو آية..." value={query} onChangeText={setQuery} />
       <View style={styles.tabs}>
         {tabs.map(({ key, label }) => (
           <Pressable
@@ -170,9 +191,48 @@ export default function QuranScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.list}
           ListHeaderComponent={
-            <View style={styles.listHeader}>
-              <Text style={[styles.listCount, { color: colors.mutedForeground }]}>{surahs.length} سورة</Text>
-              <Text style={[styles.listHint, { color: colors.mutedForeground }]}>بسم الله الرحمن الرحيم</Text>
+            <View>
+              {query.trim().length >= 2 ? (
+                verseHits.length > 0 ? (
+                  <View style={styles.verseResults}>
+                    <Text style={[styles.verseSectionTitle, { color: colors.foreground }]}>
+                      آيات مطابقة ({verseHits.length})
+                    </Text>
+                    {verseHits.map((hit) => (
+                      <Pressable
+                        key={`${hit.surahId}-${hit.ayah}`}
+                        accessibilityRole="button"
+                        accessibilityLabel={`فتح الآية ${hit.ayah} من سورة ${hit.surah}`}
+                        onPress={() => openVerseHit(hit)}
+                        style={({ pressed }) => [
+                          styles.verseRow,
+                          {
+                            backgroundColor: colors.card,
+                            borderColor: colors.border,
+                            opacity: pressed ? 0.7 : 1,
+                          },
+                        ]}
+                      >
+                        <Text numberOfLines={3} style={[styles.verseText, { color: colors.foreground }]}>
+                          {hit.text}
+                        </Text>
+                        <Text style={[styles.verseMeta, { color: colors.primary }]}>
+                          {hit.surah} — الآية {toArabicDigits(hit.ayah)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={[styles.verseNoHits, { color: colors.mutedForeground }]}>
+                    لا تطابق في الآيات المحمَّلة على جهازك — نزّل القرآن (كاملًا أو سورة واحدة)
+                    من شاشة التنزيل لتشغيل البحث في الآيات.
+                  </Text>
+                )
+              ) : null}
+              <View style={styles.listHeader}>
+                <Text style={[styles.listCount, { color: colors.mutedForeground }]}>{surahs.length} سورة</Text>
+                <Text style={[styles.listHint, { color: colors.mutedForeground }]}>بسم الله الرحمن الرحيم</Text>
+              </View>
             </View>
           }
           ListEmptyComponent={
@@ -283,6 +343,17 @@ const styles = StyleSheet.create({
   tabText: { fontSize: typography.bodySmall, fontWeight: '700' },
   list: { paddingBottom: 110 },
   gridList: { paddingBottom: 110, paddingTop: spacing.md },
+  verseResults: { gap: spacing.sm, paddingTop: spacing.lg },
+  verseSectionTitle: { fontSize: typography.bodyLarge, fontWeight: '800', marginBottom: spacing.xs, textAlign: 'right' },
+  verseRow: {
+    borderRadius: radii.md,
+    borderWidth: 1,
+    gap: spacing.xs,
+    padding: spacing.sm,
+  },
+  verseText: { fontSize: typography.bodySmall, lineHeight: 22, textAlign: 'right' },
+  verseMeta: { fontSize: typography.caption, fontWeight: '700', textAlign: 'right' },
+  verseNoHits: { fontSize: typography.bodySmall, lineHeight: 22, paddingTop: spacing.lg, textAlign: 'center' },
   listHeader: { alignItems: 'center', flexDirection: 'row-reverse', justifyContent: 'space-between', paddingVertical: spacing.lg },
   listCount: { fontSize: typography.caption },
   listHint: { fontSize: typography.bodySmall, textAlign: 'right' },
