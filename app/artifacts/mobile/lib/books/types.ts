@@ -45,6 +45,27 @@ export const ISLAMHOUSE_CAPABILITIES: IslamicBookCapabilities = {
   canUpdate: true,
 };
 
+/** قدرات البحث المتحقَّق منها حيًا (انظر توثيق BookSearchCapabilities). */
+export const TURATH_SEARCH_CAPABILITIES: BookSearchCapabilities = {
+  canSearchText: true,
+  canFilterByCategory: true,
+  canFilterByAuthorId: true,
+  canFilterByAuthorName: false,
+  canFilterByTitle: false,
+  textSearchIsLocal: false,
+  requiresTextTerm: true,
+};
+
+export const ISLAMHOUSE_SEARCH_CAPABILITIES: BookSearchCapabilities = {
+  canSearchText: false,
+  canFilterByCategory: true,
+  canFilterByAuthorId: true,
+  canFilterByAuthorName: false,
+  canFilterByTitle: false,
+  textSearchIsLocal: true,
+  requiresTextTerm: false,
+};
+
 export type IslamicBookCategory = {
   id: string;
   source: IslamicLibrarySource;
@@ -121,4 +142,68 @@ export type IslamicBookSearchResult = {
   perPage: number;
   total: number;
   hasMore: boolean;
+};
+
+/* -------------------------------------------------------------------------- */
+/* البحث المتقدم — قدرات حقيقية مُتحقَّق منها حيًا قبل البناء                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * قدرات البحث **المتحقَّق منها** لكل مزوّد (لا شيء هنا مُتَوَهَّم):
+ *
+ * تراث (api.turath.io ver=3):
+ *  - /search?q=&page=            → نص حر داخل المحتوى ✅ (q إلزامي: بدونه 400)
+ *  - /search?...&cat=<id>        → فلترة تصنيف من المصدر ✅
+ *  - /search?...&author=<id>     → فلترة مؤلف بالمعرّف الرقمي فقط ✅
+ *  - لا يوجد: بحث بالعنوان وحده ❌ / بحث باسم المؤلف نصيًا ❌ / تعداد تصنيفات ❌
+ *
+ * إسلام هاوس (api3 v3):
+ *  - /main/get-category-items/{id}/...  → فلترة تصنيف من المصدر ✅
+ *  - /main/get-author-items/{id}/...   → فلترة مؤلف بالمعرّف ✅
+ *  - لا يوجد: أي بحث نصي (/main/search = 404) ❌ ولا بحث بالعنوان ❌
+ *    ولا lookup باسم المؤلف ❌ → النصي هنا تصفية محلية محدودة ومُعلَنة.
+ */
+export type BookSearchCapabilities = {
+  /** بحث نصي على خادم المصدر. */
+  canSearchText: boolean;
+  /** فلترة بالتصنيف (id) على الخادم. */
+  canFilterByCategory: boolean;
+  /** فلترة بالمؤلف (معرّف رقمي) على الخادم. */
+  canFilterByAuthorId: boolean;
+  /** فلترة باسم المؤلف (نصًا) على الخادم. */
+  canFilterByAuthorName: boolean;
+  /** فلترة باسم الكتاب (نصًا) على الخادم. */
+  canFilterByTitle: boolean;
+  /** البحث النصي يتم محليًا على ما أعطاه المصدر (لا endpoint نصي). */
+  textSearchIsLocal: boolean;
+  /** المصدر يرفض أي استعلام بلا كلمة نصية (تراث: q إلزامي). */
+  requiresTextTerm: boolean;
+};
+
+export type BookSearchMode = "free" | "title" | "author" | "category";
+
+export type BookSearchSource = "all" | IslamicLibrarySource;
+
+/** نموذج البحث الموحّد — مُهيكل على قدرات المصدرين لا على نقاط مخترَعة. */
+export type BookSearchFilters = {
+  mode?: BookSearchMode;
+  query?: string;
+  author?: string;
+  categoryId?: string;
+  source?: BookSearchSource;
+};
+
+/** خطوة تنفيذ واحدة: هل جرت على الخادم أم محليًا أم غير مدعومة أصلًا. */
+export type BookSearchPlanStep = {
+  label: string;
+  scope: "server" | "client" | "unsupported";
+};
+
+/** تقرير صريح لكل مصدر: ما الذي نُفِّذ على الخادم وما الذي تصفّى محليًا. */
+export type BookSearchNotice = {
+  source: IslamicLibrarySource;
+  sourceName: string;
+  steps: BookSearchPlanStep[];
+  /** قيود حقيقية يمنعها المزوّد (تُعرض للمستخدم كما هي). */
+  limits: string[];
 };
