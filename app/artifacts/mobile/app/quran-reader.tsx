@@ -8,6 +8,7 @@ import {
   Share,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -21,9 +22,10 @@ import {
 import { useFonts, AmiriQuran_400Regular } from '@expo-google-fonts/amiri-quran';
 import {
   groupQuranVersesByPage,
+  nextAyahPosition,
   useGetAyahAudio,
-  useGetQuranAudio,
   useGetQuranReader,
+  useGetQuranAudio,
   useGetQuranTafsir,
 } from '@/lib/api';
 import { getReadingPosition, saveReadingPosition } from '@/lib/storage';
@@ -70,6 +72,8 @@ type PageGroup = {
 export default function QuranReader() {
   const colors = useColors();
   const router = useRouter();
+  // أبعاد الشاشة: متزامنة ومضمونة — بلا قياس onLayout قابل للفشل الصامت.
+  const { width: windowWidth } = useWindowDimensions();
   const { surah, surahId } = useLocalSearchParams<{ surah?: string; surahId?: string }>();
   const id = Number(surahId);
   const validId = Number.isInteger(id) && id >= 1 && id <= 114;
@@ -96,9 +100,8 @@ export default function QuranReader() {
   const [resumeLoaded, setResumeLoaded] = useState(false);
   // الصفحة المعروضة (للمؤشر العلوي).
   const [viewedPage, setViewedPage] = useState<number | null>(null);
-  // أبعاد منطقة الصفحات — تُمرر حجمًا صريحًا لكل عنصر قائمة (إصلاح الصفحة
-  // الفارغة: عنصر قائمة أفقية لا يحسب ارتفاعه تلقائيًا فانهار إلى صفر).
-  const [pagesArea, setPagesArea] = useState({ width: 0, height: 0 });
+  // عرض الشاشة: ثابت ومتزامن — يغني عن قياس onLayout الهش الذي كان يترك
+  // القارئ فارغًا صامتًا عند فشل القياس الأول (سبب «البسملة ثم فراغ»).
 
   const readerQuery = useGetQuranReader(validId ? id : 0, {
     query: { enabled: validId },
@@ -131,18 +134,37 @@ export default function QuranReader() {
     player.play();
   }, [player, playingAyah, ayahAudioUrl]);
 
-  // نهاية الآية → التالية تلقائيًا (تلاوة متصلة داخل السورة)؛ الآية الأخيرة توقف.
+  /**
+   * نهاية الآية → التالية في الترتيب القانوني (سورة:آية). حراسة صارمة ضد
+   * التنفيذ المزدوج: didJustFinish يبقى true حتى يبدأ صوت الآية الجديدة،
+   * فبدون مرجع «آية الانتهاء المنفذة» كان القفز يتم مرتين (تخطي آية).
+   * عبور حدود السورة: التالية أول آية من السورة التالية — عبر replace مع
+   * استئناف تشغيل آلي من الآية 1؛ نهاية القرآن (114:6) توقف صامت.
+   */
   const verses = readerQuery.data?.verses ?? [];
+  const finishedAyahRef = useRef<number | null>(null);
+  const [crossing, setCrossing] = useState<null | { surah: number; playFromAyah: number }>(null);
   useEffect(() => {
     if (!audioStatus.didJustFinish || playingAyah === null) return;
-    if (playingAyah < verses.length) {
-      const next = playingAyah + 1;
-      setPlayingAyah(next);
-      setSelectedAyah(next);
+    if (finishedAyahRef.current === playingAyah) return;
+    finishedAyahRef.current = playingAyah;
+    const next = nextAyahPosition({ surah: id, ayah: playingAyah });
+    if (next && next.surah === id) {
+      setPlayingAyah(next.ayah);
+      setSelectedAyah(next.ayah);
+    } else if (next) {
+      // آخر آية في السورة → أول آية من السورة التالية (لا آية تُتخطى).
+      setPlayingAyah(null);
+      setSheetOpen(false);
+      setCrossing({ surah: next.surah, playFromAyah: next.ayah });
+      router.replace({
+        pathname: '/quran-reader',
+        params: { surahId: String(next.surah), surah: '' },
+      });
     } else {
       setPlayingAyah(null);
     }
-  }, [audioStatus.didJustFinish, playingAyah, verses.length]);
+  }, [audioStatus.didJustFinish, playingAyah, id, router]);
 
   // آخر موضع: قرأته مرة للتموضع، ثم حفظ تلقائي عند كل فتح/اختيار (نفس الشكل).
   useEffect(() => {
@@ -177,6 +199,17 @@ export default function QuranReader() {
     });
   }, [validId, id, surah, selectedAyah, resumeLoaded]);
 
+  // عبور سورة (تلاوة متصلة): عند وصول بيانات السورة الجديدة شغّل آية البدء
+  // فورًا عبر المسار القياسي نفسه (query صوت الآية → replace → play).
+  useEffect(() => {
+    if (!crossing || readerQuery.isPending || readerQuery.isError || !readerQuery.data) return;
+    const target = crossing.playFromAyah;
+    setCrossing(null);
+    finishedAyahRef.current = null;
+    setSelectedAyah(target);
+    setPlayingAyah(target);
+  }, [crossing, readerQuery.isPending, readerQuery.isError, readerQuery.data]);
+
   // الصفحات الحقيقية من بيانات الـ API (verse.page) — منطق مشترك مُختبر.
   const pages = useMemo<PageGroup[]>(() => groupQuranVersesByPage(verses), [verses]);
 
@@ -199,6 +232,8 @@ export default function QuranReader() {
 
   const toggleAyahAudio = useCallback(
     (verseNumber: number) => {
+      // إعادة تشغيل آية انتهت للتو يجب أن تتقدم طبيعيًا عند انتهائها مجددًا.
+      finishedAyahRef.current = null;
       setPlayingAyah((current) => {
         if (current === verseNumber) {
           player.pause();
@@ -373,20 +408,12 @@ export default function QuranReader() {
 
       {pages.length === 0 ? (
         <Text style={[styles.statusText, { color: colors.mutedForeground }]}>لا توجد آيات متاحة لهذه السورة.</Text>
-      ) : initialPageIndex === null || pagesArea.width === 0 ? (
-        <View style={styles.pagesWrap} onLayout={(event) => {
-          const { width, height } = event.nativeEvent.layout;
-          if (width > 0 && height > 0) {
-            setPagesArea((prev) => (prev.width === width && prev.height === height ? prev : { width, height }));
-          }
-        }} />
       ) : (
         <View style={styles.pagesWrap}>
           <FlatListH
             pages={pages}
-            itemWidth={pagesArea.width}
-            itemHeight={pagesArea.height}
-            initialPageIndex={initialPageIndex}
+            windowWidth={windowWidth}
+            initialPageIndex={initialPageIndex ?? 0}
             renderItem={renderItem}
             onPageChange={(page) => setViewedPage(page)}
           />
@@ -540,23 +567,20 @@ function surahData_nameArabic(name: string | undefined): string {
  */
 /**
  * FlatList أفقي pagingEnabled للصفحات — virtualization حقيقي: صفحات قليلة
- * فقط في الذاكرة، getItemLayout يجعل القفز الأولي/السريع رخيصًا، ولا يوجد
- * أي VirtualizedList داخل ScrollView بنفس الاتجاه (التحذير السببي مُصلح).
- * كل عنصر يأخذ حجمًا صريحًا (itemWidth/itemHeight مقاسة من الحاوية) — هذا
- * أصلح «الصفحة الفارغة»: بدون الحجم الصريح كان عنصر القائمة الأفقية ينهار
- * ارتفاعه إلى صفر فيظهر المصحف فارغًا بلا أي خطأ (فشل صامت).
+ * فقط في الذاكرة، ولا يوجد أي VirtualizedList داخل ScrollView بنفس الاتجاه.
+ * حجم العنصر من useWindowDimensions (متزامن دائمًا) — بلا onLayout إطلاقًا،
+ * فلا يمكن أن يفشل القياس ويبقى المصحف فارغًا صامتًا (السبب الجذري للعطل).
+ * ارتفاع الصفحة: FlatList الأفقي يمدّد أبناءه تلقائيًا ليملأ ارتفاعه (stretch).
  */
 function FlatListH({
   pages,
-  itemWidth,
-  itemHeight,
+  windowWidth,
   initialPageIndex,
   renderItem,
   onPageChange,
 }: {
   pages: PageGroup[];
-  itemWidth: number;
-  itemHeight: number;
+  windowWidth: number;
   initialPageIndex: number;
   renderItem: (info: { item: PageGroup }) => React.ReactElement;
   onPageChange: (page: number) => void;
@@ -585,14 +609,14 @@ function FlatListH({
       initialNumToRender={1}
       initialScrollIndex={initialPageIndex > 0 ? initialPageIndex : undefined}
       getItemLayout={(_, index) => ({
-        length: itemWidth || 1,
-        offset: (itemWidth || 1) * index,
+        length: windowWidth || 1,
+        offset: (windowWidth || 1) * index,
         index,
       })}
       onViewableItemsChanged={onViewableItemsChangedRef.current}
       viewabilityConfig={viewabilityConfigRef.current}
       renderItem={(info) => (
-        <View style={{ width: itemWidth, height: itemHeight }}>
+        <View style={{ width: windowWidth }}>
           {renderItem(info)}
         </View>
       )}

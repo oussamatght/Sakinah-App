@@ -1,21 +1,29 @@
 import React from 'react';
+
 import { Platform, StyleSheet, useColorScheme, View } from 'react-native';
+
 import { useColors } from '@/hooks/useColors';
+
 import { Feather } from '@expo/vector-icons';
+
 import { BlurView } from 'expo-blur';
+
 import { isLiquidGlassAvailable } from 'expo-glass-effect';
+
 import { Tabs } from 'expo-router';
+
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
+
 import { SymbolView } from 'expo-symbols';
 
-// IMPORTANT: iOS 26 uses NativeTabs for native tabs with liquid glass support.
-// NativeTabs intentionally does NOT use custom design tokens — liquid glass
-// is a system-level appearance provided by iOS and cannot be overridden.
-// Custom brand colors are applied only on the ClassicTabLayout path (older iOS / Android / web).
+// IMPORTANT:
+// iOS 26 uses NativeTabs for native tabs with Liquid Glass support.
+// NativeTabs intentionally does NOT use custom design tokens.
+// Classic Tabs is used on older iOS, Android and web.
 //
-// Tab set (Option أ): home / quran / prayer / tasbih / hadith.
-// "المزيد" is gone from the bar — favorites & settings moved to the home
-// header; the "حديث اليوم" card lives in the hadith tab header area instead.
+// Tab set:
+// home / quran / prayer / tasbih / hadith / books
+
 function NativeTabLayout() {
   return (
     <NativeTabs>
@@ -25,25 +33,41 @@ function NativeTabLayout() {
         />
         <NativeTabs.Trigger.Label>الرئيسية</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="quran">
         <NativeTabs.Trigger.Icon
           sf={{ default: 'book.closed', selected: 'book.closed.fill' }}
         />
         <NativeTabs.Trigger.Label>القرآن</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="prayer">
         <NativeTabs.Trigger.Icon
           sf={{ default: 'clock', selected: 'clock.fill' }}
         />
         <NativeTabs.Trigger.Label>الصلاة</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="tasbih">
-        <NativeTabs.Trigger.Icon sf={{ default: 'circle.circle', selected: 'circle.circle.fill' }} />
+        <NativeTabs.Trigger.Icon
+          sf={{ default: 'circle.circle', selected: 'circle.circle.fill' }}
+        />
         <NativeTabs.Trigger.Label>التسبيح</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="hadith">
-        <NativeTabs.Trigger.Icon sf={{ default: 'text.quote', selected: 'text.quote' }} />
+        <NativeTabs.Trigger.Icon
+          sf={{ default: 'text.quote', selected: 'text.quote' }}
+        />
         <NativeTabs.Trigger.Label>الأحاديث</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
+      {/* NEW: Islamic Books */}
+      <NativeTabs.Trigger name="books">
+        <NativeTabs.Trigger.Icon
+          sf={{ default: 'books.vertical', selected: 'books.vertical.fill' }}
+        />
+        <NativeTabs.Trigger.Label>الكتب</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
@@ -99,6 +123,7 @@ function ClassicTabLayout() {
             ),
         }}
       />
+
       <Tabs.Screen
         name="quran"
         options={{
@@ -111,6 +136,7 @@ function ClassicTabLayout() {
             ),
         }}
       />
+
       <Tabs.Screen
         name="prayer"
         options={{
@@ -123,6 +149,7 @@ function ClassicTabLayout() {
             ),
         }}
       />
+
       <Tabs.Screen
         name="tasbih"
         options={{
@@ -135,6 +162,7 @@ function ClassicTabLayout() {
             ),
         }}
       />
+
       <Tabs.Screen
         name="hadith"
         options={{
@@ -147,12 +175,31 @@ function ClassicTabLayout() {
             ),
         }}
       />
+
+      {/* NEW: Islamic Books */}
+      <Tabs.Screen
+        name="books"
+        options={{
+          title: 'الكتب',
+          tabBarIcon: ({ color }) =>
+            isIOS ? (
+              <SymbolView
+                name="books.vertical"
+                tintColor={color}
+                size={22}
+              />
+            ) : (
+              <Feather name="book" size={21} color={color} />
+            ),
+        }}
+      />
     </Tabs>
   );
 }
 
 export default function TabLayout() {
   let nativeTabsAvailable = false;
+
   if (Platform.OS === 'ios') {
     try {
       nativeTabsAvailable = isLiquidGlassAvailable();
@@ -166,6 +213,7 @@ export default function TabLayout() {
   if (nativeTabsAvailable) {
     return <NativeTabLayout />;
   }
+
   return <ClassicTabLayout />;
 }
 

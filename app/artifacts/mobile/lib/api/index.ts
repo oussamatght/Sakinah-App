@@ -8,6 +8,10 @@ export {
   fetchQuranTafsir,
   fetchQuranJuz,
   groupQuranVersesByPage,
+  SURAH_AYAH_COUNTS,
+  nextAyahPosition,
+  prevAyahPosition,
+  type AyahPosition,
 } from "./quran";
 export {
   fetchHadithCategories,
