@@ -36,9 +36,19 @@ export default function FavoritesScreen() {
 
   const openItem = (item: FavoriteItem) => {
     if (item.kind === 'ayah') {
-      const surahId = Number(item.refId.split(':')[0]);
+      // refId = "سورة:آية" (verseKey) — فتح موضع دقيق: الآية داخل صفحتها.
+      const [surahIdRaw, ayahRaw] = item.refId.split(':');
+      const surahId = Number(surahIdRaw);
+      const ayahNumber = Number(ayahRaw);
       if (Number.isInteger(surahId) && surahId >= 1 && surahId <= 114) {
-        router.push({ pathname: '/quran-reader', params: { surahId: String(surahId), surah: item.subtitle ?? '' } });
+        router.push({
+          pathname: '/quran-reader',
+          params: {
+            surahId: String(surahId),
+            ...(Number.isInteger(ayahNumber) && ayahNumber >= 1 ? { ayah: String(ayahNumber) } : {}),
+            ...(item.subtitle ? { surah: item.subtitle.split(':')[0].trim() } : {}),
+          },
+        });
       }
     } else if (item.kind === 'hadith') {
       router.push('/hadith-browser');

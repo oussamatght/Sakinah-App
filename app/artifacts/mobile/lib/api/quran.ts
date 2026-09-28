@@ -26,6 +26,9 @@ import type {
 const ALQURAN_API = "https://api.alquran.cloud/v1";
 const QURAN_COM_API = "https://api.quran.com/api/v4";
 
+// إعادة تصدير لمستهلكي مسار الصفحات (القارئ والاختبارات).
+export type { QuranPageGroup, QuranSurah } from "./types";
+
 /** Reciter 7 on api.quran.com = Mishary Rashid Alafasy (murattal). */
 const RECITER_ID = 7;
 const RECITER_NAME = "مشاري العفاسي";
@@ -355,6 +358,41 @@ export function prevAyahPosition(pos: AyahPosition): AyahPosition | null {
   if (ayah > 1) return { surah, ayah: ayah - 1 };
   if (surah > 1) return { surah: surah - 1, ayah: ayahCountOf(surah - 1) };
   return null;
+}
+
+/**
+ * تسطيح سورة في مسار المصحف المتصل: تُدمج صفحات السورة (verse.page الحقيقي)
+ * مع صفحات السور السابقة المحفوظة — أرقام الصفحات هي المرجع الوحيد للعرض،
+ * والترتيب سورة:آية للتنقّل. الدالة نقية ومُختبرة (البقرة = 48 صفحة...).
+ */
+export function flattenSurahIntoQuranPages(
+  existing: QuranPageGroup[],
+  surah: QuranSurah,
+): QuranPageGroup[] {
+  const merged = new Map<number, QuranPageGroup>();
+  for (const group of existing) merged.set(group.page, group);
+  for (const verse of surah.verses) {
+    if (!Number.isInteger(verse.page) || verse.page < 1) continue;
+    const group = merged.get(verse.page);
+    if (group) {
+      if (!group.verses.some((item) => item.verseKey === verse.verseKey)) {
+        group.verses.push(verse);
+      }
+    } else {
+      merged.set(verse.page, { page: verse.page, verses: [verse] });
+    }
+  }
+  for (const group of merged.values()) {
+    // الترتيب داخل الصفحة: قانوني (سورة، آية) — الصفحة الواحدة قد تحوي نهاية
+    // سورة وبداية التي تليها (مثل 604: الإخلاص ثم الفلق)، وترتيب verseNumber
+    // وحده كان سيخلطهما (112:1 ثم 113:1 ثم 112:2...).
+    group.verses.sort((a, b) => {
+      const [as, aa] = a.verseKey.split(":");
+      const [bs, ba] = b.verseKey.split(":");
+      return Number(as) * 1000 + Number(aa) - (Number(bs) * 1000 + Number(ba));
+    });
+  }
+  return [...merged.values()].sort((a, b) => a.page - b.page);
 }
 
 /**

@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 import { Feather } from '@expo/vector-icons';
 import {
   setAudioModeAsync,
@@ -21,12 +22,17 @@ import {
 } from 'expo-audio';
 import { useFonts, AmiriQuran_400Regular } from '@expo-google-fonts/amiri-quran';
 import {
-  groupQuranVersesByPage,
+  fetchQuranSurah,
+  flattenSurahIntoQuranPages,
   nextAyahPosition,
+  quranKeys,
   useGetAyahAudio,
-  useGetQuranReader,
   useGetQuranAudio,
+  useGetQuranReader,
+  useGetQuranSurahs,
   useGetQuranTafsir,
+  type QuranPageGroup,
+  type QuranSurah,
 } from '@/lib/api';
 import { getReadingPosition, saveReadingPosition } from '@/lib/storage';
 import {
@@ -51,30 +57,56 @@ const MUSHAF_BASE = Math.round(typography.quranLarge * 1.15);
 /** اسم عائلة الخط كما سُجل في useFonts (مفتاح التحميل نفسه). */
 const MUSHAF_FONT = 'AmiriQuran_400Regular';
 
-type PageGroup = {
-  page: number;
-  verses: { verseKey: string; verseNumber: number; text: string }[];
-};
+type PageGroup = QuranPageGroup;
+
+/** أدوات مساعدة للتسطيح (كلها من بيانات الصفحات نفسها — لا مصدر ثانٍ). */
+function pageSurahId(group: PageGroup): number {
+  const first = group.verses[0];
+  return first ? Number(first.verseKey.split(':')[0]) : 0;
+}
+function pageMinSurah(group: PageGroup): number {
+  let min = 115;
+  for (const verse of group.verses) {
+    const s = Number(verse.verseKey.split(':')[0]);
+    if (s < min) min = s;
+  }
+  return min === 115 ? 0 : min;
+}
+function pageStartsSurah(group: PageGroup): boolean {
+  const min = pageMinSurah(group);
+  return min > 0 && group.verses.some((v) => Number(v.verseKey.split(':')[0]) === min && v.verseNumber === 1);
+}
 
 /**
- * قارئ المصحف (إعادة بناء):
- *  - نص متصل مثل صفحة المصحف: آيات متتالية في <Text> واحد بعلامات أرقام
- *    الآيات — لا Card لكل آية.
- *  - صفحات حقيقية من الـ API (verse.page) في FlatList أفقي pagingEnabled —
- *    virtualization حقيقي (3 صفحات في الذاكرة) وبلا أي nested VirtualizedList
- *    (محتوى الصفحة نص + ScrollView عمودي بمحور مختلف).
- *  - الضغط على آية → Bottom sheet: الآية + التفسير + تشغيل صوت الآية
- *    (api.quran.com by_ayah — نفس recitation API الحالي) + المفضلة + مشاركة.
- *  - الآية قيد التلاوة تُظلل بلون خلفية فقط — النص لا يتغير أبدًا.
- *  - آخر موضع قراءة والمفضلة: نفس التخزين الحالي (نفس المفاتيح والأشكال).
- *  - fontScale من المتجر المشترك يتحكم بكل النص القرآني ديناميكيًا.
+ * قارئ المصحف المتصل (Mushaf):
+ *  - الصفحات: أرقام صفحات المصحف الحقيقية (verse.page من quran-uthmani) —
+ *    لا قسمة نصية ولا إعادة تدفّق؛ كل صفحة حاوية ثابت بنفس الموضع على الشاشة
+ *    (عرض الشاشة من useWindowDimensions — بلا قياسات onLayout قابلة للفشل).
+ *  - الاستمرارية: التسطيح التدريجي (flattenSurahIntoQuranPages) يدمج صفحات
+ *    السور مع بعضها في مسار واحد 1..604 — السورة الطويلة تمتد عبر صفحاتها
+ *    الطبيعية، ولا تُحشر السورة في صفحة واحدة أبدًا.
+ *  - الترتيب: سورة:آية قانوني (مفتاح مستقر verseKey) — الصفحات للعرض فقط.
+ *  - التنقل: سحب أفقي صفحة-بصفحة (pagingEnabled)؛ «قلب الصفحة» للأمام يمدّد
+ *    المسار للسورة التالية فقط ب نيّة مستخدم صريحة (حارس userIntent) حتى لا
+ *    يقفز التلاوة العابرة للسورة صفحاتٍ بنفسها؛ التكملة خلف المواضع المفتوحة
+ *    من النهاية (أرقام صفحات مبكرة) تتم تلقائيًا best-effort.
+ *  - الضغط على آية → Bottom sheet: الآية + التفسير + صوت الآية + المفضلة +
+ *    المشاركة (كلها بمفتاح سورة:آية الصحيح حتى على صفحات سورة أخرى).
+ *  - آخر موضع: يُحفظ مع رقم الصفحة (pageNum) ويُعاد فتحه على الصفحة نفسها.
  */
 export default function QuranReader() {
   const colors = useColors();
   const router = useRouter();
+  const queryClient = useQueryClient();
   // أبعاد الشاشة: متزامنة ومضمونة — بلا قياس onLayout قابل للفشل الصامت.
   const { width: windowWidth } = useWindowDimensions();
-  const { surah, surahId } = useLocalSearchParams<{ surah?: string; surahId?: string }>();
+  const { surah, surahId, ayah, pageNum, openSheet } = useLocalSearchParams<{
+    surah?: string;
+    surahId?: string;
+    ayah?: string;
+    pageNum?: string;
+    openSheet?: string;
+  }>();
   const id = Number(surahId);
   const validId = Number.isInteger(id) && id >= 1 && id <= 114;
 
@@ -90,18 +122,50 @@ export default function QuranReader() {
   // خط أميري قرآن — يدعم الحركات/الشدة/المد/الهمزات/علامات الوقف كاملة.
   const [fontsLoaded, fontError] = useFonts({ AmiriQuran_400Regular });
 
+  // أسماء السور (عرض الهيدر على الصفحات العابرة للسور).
+  const surahsQuery = useGetQuranSurahs();
+  const chapterNames = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const chapter of surahsQuery.data ?? []) map.set(chapter.id, chapter.nameArabic);
+    return map;
+  }, [surahsQuery.data]);
+
   // "آية 1" حتى أول ضغط؛ الـ sheet يتبع الآية المختارة.
   const [selectedAyah, setSelectedAyah] = useState(1);
-  const [sheetOpen, setSheetOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(openSheet === '1');
   // آية التلاوة الحالية (null = صامت) — منفصلة عن الاختيار.
   const [playingAyah, setPlayingAyah] = useState<number | null>(null);
-  // آخر موضع محفوظ (يُقرأ مرة لتموضع الصفحة/الآية) ثم يُفعَّل العرض.
-  const [resume, setResume] = useState<{ ayah: number; page: number } | null>(null);
+  // آخر موضع محفوظ (يُقرأ مرة للتموضع) ثم يُفعَّل العرض.
+  const [resume, setResume] = useState<{ ayah: number } | null>(null);
   const [resumeLoaded, setResumeLoaded] = useState(false);
-  // الصفحة المعروضة (للمؤشر العلوي).
+  // الصفحة المعروضة (للهيدر).
   const [viewedPage, setViewedPage] = useState<number | null>(null);
-  // عرض الشاشة: ثابت ومتزامن — يغني عن قياس onLayout الهش الذي كان يترك
-  // القارئ فارغًا صامتًا عند فشل القياس الأول (سبب «البسملة ثم فراغ»).
+
+  // ---------- مسار المصحف المتصل ----------
+  // صفحات السورة الهدف (+ ما قبلها من params) — بذرة المسار من العنوان نفسه.
+  const targetSurahId = validId ? id : 0;
+  const targetAyah = useMemo(() => {
+    const n = Number(ayah);
+    return Number.isInteger(n) && n >= 1 && n <= 286 ? n : 1;
+  }, [ayah]);
+  const targetPageNum = useMemo(() => {
+    const n = Number(pageNum);
+    return Number.isInteger(n) && n >= 1 && n <= 604 ? n : null;
+  }, [pageNum]);
+
+  // مسار الصفحات يبدأ فارغًا ويمتلئ بالتسطيح عند وصول بيانات السورة
+  // (نفس ذاكرة useQuery — لا طلب ثانٍ ولا مصدر بيانات موازٍ).
+  const [pages, setPages] = useState<PageGroup[]>([]);
+  const [nextSurahId, setNextSurahId] = useState<number | null>(validId && id < 114 ? id + 1 : null);
+  const [targetPageIndex, setTargetPageIndex] = useState<number | null>(null);
+
+  // نيّة المستخدم: heartbeats من السحب الفعلي فقط — يمنع «قلب الصفحة» الآلي
+  // أثناء عبور التلاوة لسورة أخرى من أن يمدّد المسار ويقلب صفحات تلقائيًا.
+  const userIntentRef = useRef(false);
+  // تكملة خلفية best-effort: آخر حد حاولنا تجاوزه (منع تكرار المحاولات).
+  const backwardAttemptRef = useRef<number | null>(null);
+  // عبور سورة (تلاوة متصلة): {surah} السورة التالية التي سنفتحها.
+  const [crossing, setCrossing] = useState<number | null>(null);
 
   const readerQuery = useGetQuranReader(validId ? id : 0, {
     query: { enabled: validId },
@@ -143,7 +207,6 @@ export default function QuranReader() {
    */
   const verses = readerQuery.data?.verses ?? [];
   const finishedAyahRef = useRef<number | null>(null);
-  const [crossing, setCrossing] = useState<null | { surah: number; playFromAyah: number }>(null);
   useEffect(() => {
     if (!audioStatus.didJustFinish || playingAyah === null) return;
     if (finishedAyahRef.current === playingAyah) return;
@@ -154,31 +217,101 @@ export default function QuranReader() {
       setSelectedAyah(next.ayah);
     } else if (next) {
       // آخر آية في السورة → أول آية من السورة التالية (لا آية تُتخطى).
+      // userIntent=false: لا «قلب صفحة» آلي أثناء العبور — الصفحة الأولى
+      // للسورة الجديدة تُفتح حيث هي.
+      userIntentRef.current = false;
       setPlayingAyah(null);
       setSheetOpen(false);
-      setCrossing({ surah: next.surah, playFromAyah: next.ayah });
+      setCrossing(next.surah);
       router.replace({
         pathname: '/quran-reader',
-        params: { surahId: String(next.surah), surah: '' },
+        params: { surahId: String(next.surah), ayah: String(next.ayah) },
       });
     } else {
       setPlayingAyah(null);
     }
   }, [audioStatus.didJustFinish, playingAyah, id, router]);
 
-  // آخر موضع: قرأته مرة للتموضع، ثم حفظ تلقائي عند كل فتح/اختيار (نفس الشكل).
+  // تسطيح: عند وصول بيانات السورة الحالية ادمج صفحاتها في مسار المصحف.
+  useEffect(() => {
+    if (!validId || readerQuery.isPending || readerQuery.isError || !readerQuery.data) return;
+    setPages((prev) => flattenSurahIntoQuranPages(prev, readerQuery.data!));
+  }, [validId, readerQuery.isPending, readerQuery.isError, readerQuery.data]);
+
+  // القفز الأولي: مرة واحدة — إلى صفحة (pageNum) أو صفحة الآية (ayah/1).
+  useEffect(() => {
+    if (targetPageIndex !== null || pages.length === 0) return;
+    const hasTarget =
+      pages.some((p) => pageSurahId(p) === targetSurahId) || targetPageNum !== null;
+    if (!hasTarget) return;
+    let index = -1;
+    if (targetPageNum !== null) {
+      index = pages.findIndex((p) => p.page === targetPageNum);
+    } else {
+      index = pages.findIndex(
+        (p) => pageSurahId(p) === targetSurahId && p.verses.some((v) => v.verseNumber === targetAyah),
+      );
+      if (index < 0) {
+        index = pages.findIndex((p) => pageSurahId(p) === targetSurahId);
+      }
+    }
+    if (index < 0) return;
+    setTargetPageIndex(index);
+  }, [pages, targetPageIndex, targetSurahId, targetAyah, targetPageNum]);
+
+  // تكملة خلفية best-effort: فُتح موضع صفحاته قبل بداية المسار المدموج
+  // (pageNum مبكر أو سورة فُتحت من منتصفها) — نستدعي السور السابقة تباعًا
+  // حتى تُدمج صفحتها (ولو فشلت الشبكة يبقى المسار الحالي سليمًا).
+  useEffect(() => {
+    if (pages.length === 0 || targetPageIndex !== null) return;
+    const flatMin = Math.min(...pages.map((p) => p.page));
+    const wanted =
+      targetPageNum !== null && targetPageNum < flatMin
+        ? targetPageNum
+        : targetPageNum === null && pages[0] && pageMinSurah(pages[0]) !== pageSurahId(pages[0])
+          ? flatMin
+          : null;
+    if (wanted === null || wanted >= flatMin) return;
+    if (flatMin <= 1) return;
+    const prevSurahId = pageSurahId(pages[0]) - 1;
+    if (prevSurahId < 1) return;
+    if (backwardAttemptRef.current === prevSurahId) return;
+    backwardAttemptRef.current = prevSurahId;
+    void queryClient
+      .fetchQuery({
+        queryKey: quranKeys.surah(prevSurahId),
+        queryFn: () => fetchQuranSurah(prevSurahId),
+        staleTime: Infinity,
+      })
+      .then((surah) => setPages((prev) => flattenSurahIntoQuranPages(prev, surah)))
+      .catch(() => undefined);
+  }, [pages, targetPageIndex, targetPageNum, queryClient]);
+
+  // استئناف التلاوة بعد عبور سورة: عند اكتمال بيانات السورة الجديدة شغّل
+  // آية البدء عبر المسار القياسي نفسه (query صوت الآية → replace → play).
+  useEffect(() => {
+    if (crossing === null) return;
+    if (!validId || id !== crossing) return;
+    if (readerQuery.isPending || readerQuery.isError || !readerQuery.data) return;
+    setCrossing(null);
+    finishedAyahRef.current = null;
+    setSelectedAyah(1);
+    setPlayingAyah(1);
+  }, [crossing, validId, id, readerQuery.isPending, readerQuery.isError, readerQuery.data]);
+
+  // آخر موضع: قرأته مرة للتموضع، ثم حفظ تلقائي عند كل فتح/اختيار.
   useEffect(() => {
     let active = true;
     void (async () => {
       try {
         const position = await getReadingPosition();
         if (!active || !position || position.surahId !== id) {
-          setResume({ ayah: 1, page: 0 });
+          setResume({ ayah: 1 });
           return;
         }
-        setResume({ ayah: position.ayahNumber, page: 0 });
+        setResume({ ayah: position.ayahNumber });
       } catch {
-        if (active) setResume({ ayah: 1, page: 0 });
+        if (active) setResume({ ayah: 1 });
       } finally {
         if (active) setResumeLoaded(true);
       }
@@ -191,44 +324,31 @@ export default function QuranReader() {
   }, [id]);
 
   useEffect(() => {
-    if (!validId || !resumeLoaded) return;
+    if (!validId || !resumeLoaded || !resume) return;
     void saveReadingPosition({
       surahId: id,
       surahName: surah,
       ayahNumber: selectedAyah,
+      pageNum: viewedPage ?? undefined,
     });
-  }, [validId, id, surah, selectedAyah, resumeLoaded]);
+  }, [validId, id, surah, selectedAyah, viewedPage, resumeLoaded, resume]);
 
-  // عبور سورة (تلاوة متصلة): عند وصول بيانات السورة الجديدة شغّل آية البدء
-  // فورًا عبر المسار القياسي نفسه (query صوت الآية → replace → play).
-  useEffect(() => {
-    if (!crossing || readerQuery.isPending || readerQuery.isError || !readerQuery.data) return;
-    const target = crossing.playFromAyah;
-    setCrossing(null);
-    finishedAyahRef.current = null;
-    setSelectedAyah(target);
-    setPlayingAyah(target);
-  }, [crossing, readerQuery.isPending, readerQuery.isError, readerQuery.data]);
-
-  // الصفحات الحقيقية من بيانات الـ API (verse.page) — منطق مشترك مُختبر.
-  const pages = useMemo<PageGroup[]>(() => groupQuranVersesByPage(verses), [verses]);
-
-  // بعد معرفة الصفحات: قفز أولي لصفحة آخر موضع (فقرة savedAyah).
-  const [initialPageIndex, setInitialPageIndex] = useState<number | null>(null);
-  useEffect(() => {
-    if (!resumeLoaded || !resume || pages.length === 0) return;
-    const saved = verses.find((verse) => verse.verseNumber === resume.ayah);
-    const index = saved ? pages.findIndex((group) => group.page === saved.page) : -1;
-    setInitialPageIndex(index >= 0 ? index : 0);
-    setSelectedAyah(resume.ayah);
-    // يعمل مرة واحدة بعد أول تحميل للصفحات.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resumeLoaded, pages.length === 0]);
-
-  const onAyahPress = useCallback((verseNumber: number) => {
-    setSelectedAyah(verseNumber);
-    setSheetOpen(true);
-  }, []);
+  const onAyahPress = useCallback(
+    (verseSurahId: number, verseNumber: number) => {
+      setSelectedAyah(verseNumber);
+      setSheetOpen(true);
+      if (verseSurahId !== id) {
+        // آية على صفحة سورة أخرى: إعادة تثبيت المسار على سورتها — يبقى
+        // التفسير/الصوت/المفضلة بمفاتيح سورة:آية الصحيحة.
+        userIntentRef.current = true;
+        router.replace({
+          pathname: '/quran-reader',
+          params: { surahId: String(verseSurahId), ayah: String(verseNumber), openSheet: '1' },
+        });
+      }
+    },
+    [id, router],
+  );
 
   const toggleAyahAudio = useCallback(
     (verseNumber: number) => {
@@ -251,7 +371,7 @@ export default function QuranReader() {
     if (!verse) return;
     try {
       await Share.share({
-        message: `${verse.text}\n﴿${toArabicDigits(verse.verseNumber)}﴾ ${surahData_nameArabic(readerQuery.data?.nameArabic)} — الآية ${verse.verseNumber}`,
+        message: `${verse.text}\n﴿${toArabicDigits(verse.verseNumber)}﴾ ${readerQuery.data?.nameArabic ?? ''} — الآية ${verse.verseNumber}`,
       });
     } catch {
       // المشاركة اختيارية — إلغاء المستخدم ليس خطأ.
@@ -277,7 +397,7 @@ export default function QuranReader() {
   }
 
   if (readerQuery.isError || !readerQuery.data) {
-    // Fix 9: فشل فتح آخر موضع لا يترك المستخدم في طريق مسدود.
+    // فشل فتح آخر موضع لا يترك المستخدم في طريق مسدود.
     return (
       <Screen>
         <IconButton icon="arrow-right" label="العودة" onPress={() => router.back()} variant="soft" />
@@ -304,66 +424,86 @@ export default function QuranReader() {
   }
 
   const surahData = readerQuery.data;
-  const firstVerse = verses[0];
   const chapterAudioLabel = chapterAudioQuery.isPending
     ? 'جارٍ تجهيز الصوت'
     : chapterAudioQuery.isError
       ? 'تعذر تحميل الصوت'
       : 'استماع للسورة كاملة';
-  const showBismillahBanner = id !== 1 && id !== 9; // الفاتحة: البسملة آيتها 1؛ التوبة: لا بسملة
+
+  // سورة الصفحة المعروضة (للهيدر والبسملة) — قد تختلف عن سورة المسار.
+  const viewedGroup = pages.find((p) => p.page === viewedPage);
+  const headerSurahId = viewedGroup ? pageMinSurah(viewedGroup) || id : id;
+  const headerSurahName = chapterNames.get(headerSurahId) ?? surahData.nameArabic ?? surah ?? 'القرآن الكريم';
+  const showBismillahBanner = headerSurahId !== 1 && headerSurahId !== 9;
+
   // هل آية التلاوة الحالية معروضة على الصفحة الظاهرة؟
   const playedVerse = playingAyah !== null ? verses.find((v) => v.verseNumber === playingAyah) : undefined;
   const isAyahOnViewedPage =
     playingAyah === null || viewedPage === null || playedVerse?.page === viewedPage;
 
-  const renderItem = ({ item }: { item: PageGroup }) => (
-    <View style={styles.pageContainer}>
-      <ScrollView showsVerticalScrollIndicator={false} style={styles.pageScroll}>
-        <View style={styles.pageInner}>
-          {/* نص متصل: آيات متتابعة داخل Text واحد — span لكل آية قابل للضغط */}
-          <Text style={[styles.mushafText, { fontSize: mushafSize, lineHeight: mushafLineHeight, color: colors.foreground }]}>
-            {item.verses.map((verse) => {
-              const isPlaying = playingAyah === verse.verseNumber;
-              const isSelected = sheetOpen && selectedAyah === verse.verseNumber && !isPlaying;
-              return (
-                <Text
-                  key={verse.verseKey}
-                  testID={`ayah-${verse.verseNumber}`}
-                  onPress={() => onAyahPress(verse.verseNumber)}
-                  style={[
-                    styles.ayahSpan,
-                    isPlaying && { backgroundColor: colors.primary, color: colors.primaryForeground },
-                    isSelected && { backgroundColor: colors.secondary },
-                  ]}
-                >
-                  {verse.text}
-                  <Text style={[styles.ayahMarker, isPlaying && { color: colors.primaryForeground }]}>
-                    {' '}﴿{toArabicDigits(verse.verseNumber)}﴾
-                  </Text>
-                  {' '}
+  const renderItem = ({ item }: { item: PageGroup }) => {
+    const pageSurah = pageSurahId(item);
+    const startsSurah = pageStartsSurah(item);
+    return (
+      <View style={styles.pageContainer}>
+        <ScrollView showsVerticalScrollIndicator={false} style={styles.pageScroll}>
+          <View style={styles.pageInner}>
+            {/* ترويسة السورة داخل الصفحة: عند بدء سورة في منتصف مسار الصفحات */}
+            {startsSurah ? (
+              <View style={styles.surahStartBanner}>
+                <Text style={[styles.surahStartName, { color: colors.primary }]}>
+                  سورة {chapterNames.get(pageSurah) ?? ''}
                 </Text>
-              );
-            })}
-          </Text>
-        </View>
-      </ScrollView>
-      <Text style={[styles.pageFooter, { color: colors.mutedForeground }]}>
-        صفحة {toArabicDigits(item.page)}
-      </Text>
-    </View>
-  );
+              </View>
+            ) : null}
+            {/* نص متصل: آيات متتابعة داخل Text واحد — span لكل آية قابل للضغط */}
+            <Text
+              style={[
+                styles.mushafText,
+                { fontSize: mushafSize, lineHeight: mushafLineHeight, color: colors.foreground },
+              ]}>
+              {item.verses.map((verse) => {
+                const verseSurah = Number(verse.verseKey.split(':')[0]);
+                const isPlaying = id === verseSurah && playingAyah === verse.verseNumber;
+                const isSelected =
+                  sheetOpen && id === verseSurah && selectedAyah === verse.verseNumber && !isPlaying;
+                return (
+                  <Text
+                    key={verse.verseKey}
+                    testID={`ayah-${verse.verseNumber}`}
+                    onPress={() => onAyahPress(verseSurah, verse.verseNumber)}
+                    style={[
+                      styles.ayahSpan,
+                      isPlaying && { backgroundColor: colors.primary, color: colors.primaryForeground },
+                      isSelected && { backgroundColor: colors.secondary },
+                    ]}
+                  >
+                    {verse.text}
+                    <Text style={[styles.ayahMarker, isPlaying && { color: colors.primaryForeground }]}>
+                      {' '}﴿{toArabicDigits(verse.verseNumber)}﴾
+                    </Text>
+                    {' '}
+                  </Text>
+                );
+              })}
+            </Text>
+          </View>
+        </ScrollView>
+        <Text style={[styles.pageFooter, { color: colors.mutedForeground }]}>
+          صفحة {toArabicDigits(item.page)}
+        </Text>
+      </View>
+    );
+  };
 
   return (
     <Screen scroll={false} contentStyle={styles.readerContent}>
       <View style={styles.readerHeader}>
         <IconButton icon="arrow-right" label="العودة" onPress={() => router.back()} variant="soft" />
         <View style={styles.readerTitle}>
-          <Text style={[styles.surahTitle, { color: colors.foreground }]}>
-            {surahData.nameArabic || surah || 'القرآن الكريم'}
-          </Text>
+          <Text style={[styles.surahTitle, { color: colors.foreground }]}>{headerSurahName}</Text>
           <Text style={[styles.readerMeta, { color: colors.mutedForeground }]}>
-            {surahData.revelationPlace === 'makkah' ? 'مكية' : 'مدنية'} • {surahData.versesCount} آية
-            {viewedPage ? ` • صفحة ${toArabicDigits(viewedPage)}` : ''}
+            {viewedPage ? `صفحة ${toArabicDigits(viewedPage)}` : `${surahData.versesCount} آية`}
           </Text>
           {/* آية قيد التلاوة في صفحة أخرى (قلّب المستخدم الصفحة يدويًا):
               نستمر بالتشغيل بصمت مع مؤشر نصي بسيط — بلا قفز قسري للصفحة. */}
@@ -407,15 +547,42 @@ export default function QuranReader() {
       ) : null}
 
       {pages.length === 0 ? (
-        <Text style={[styles.statusText, { color: colors.mutedForeground }]}>لا توجد آيات متاحة لهذه السورة.</Text>
+        <Text style={[styles.statusText, { color: colors.mutedForeground }]}>لا توجد آيات متاحة.</Text>
       ) : (
         <View style={styles.pagesWrap}>
           <FlatListH
             pages={pages}
             windowWidth={windowWidth}
-            initialPageIndex={initialPageIndex ?? 0}
+            initialPageIndex={targetPageIndex ?? 0}
             renderItem={renderItem}
             onPageChange={(page) => setViewedPage(page)}
+            onNearEnd={() => {
+              // «قلب الصفحة» نحو النهاية = نيّة مستخدم صريحة: يُمدّ المسار
+              // إلى السورة التالية (مرة واحدة لكل صفحة نهاية).
+              userIntentRef.current = true;
+              const last = pages[pages.length - 1];
+              if (!last || nextSurahId) return;
+              const nextId = pageSurahId(last) + 1;
+              if (nextId > 114) return;
+              setNextSurahId(nextId);
+              const apply = (data: QuranSurah) => {
+                setPages((prev) => flattenSurahIntoQuranPages(prev, data));
+                setNextSurahId(null);
+              };
+              const cached = queryClient.getQueryData<QuranSurah>(quranKeys.surah(nextId));
+              if (cached) {
+                apply(cached);
+                return;
+              }
+              void queryClient
+                .fetchQuery({
+                  queryKey: quranKeys.surah(nextId),
+                  queryFn: () => fetchQuranSurah(nextId),
+                  staleTime: Infinity,
+                })
+                .then(apply)
+                .catch(() => setNextSurahId(null));
+            }}
           />
         </View>
       )}
@@ -549,28 +716,19 @@ export default function QuranReader() {
       </Modal>
 
       <Text style={[styles.readerHint, { color: colors.mutedForeground }]}>
-        اضغط أي آية للتفسير والصوت والمفضلة • اسحب بين الصفحات
+        اضغط أي آية للتفسير والصوت والمفضلة • اسحب لقلب الصفحات
       </Text>
     </Screen>
   );
 }
 
-/** اسم السورة بأمان (عرض فقط). */
-function surahData_nameArabic(name: string | undefined): string {
-  return name ?? '';
-}
-
-/**
- * FlatList أفقي pagingEnabled للصفحات — virtualization حقيقي: صفحات قليلة
- * فقط في الذاكرة، getItemLayout يجعل القفز الأولي/السريع رخيصًا، ولا يوجد
- * أي VirtualizedList داخل ScrollView بنفس الاتجاه (التحذير السببي مُصلح).
- */
 /**
  * FlatList أفقي pagingEnabled للصفحات — virtualization حقيقي: صفحات قليلة
  * فقط في الذاكرة، ولا يوجد أي VirtualizedList داخل ScrollView بنفس الاتجاه.
  * حجم العنصر من useWindowDimensions (متزامن دائمًا) — بلا onLayout إطلاقًا،
  * فلا يمكن أن يفشل القياس ويبقى المصحف فارغًا صامتًا (السبب الجذري للعطل).
- * ارتفاع الصفحة: FlatList الأفقي يمدّد أبناءه تلقائيًا ليملأ ارتفاعه (stretch).
+ * كل صفحة تشغل نفس الموضع بالضبط: عرض العنصر = عرض الشاشة، والارتفاع يتمدد
+ * داخل حاوية القائمة (لا يعتمد موضع صفحةٍ في كثافة نص صفحة أخرى).
  */
 function FlatListH({
   pages,
@@ -578,18 +736,22 @@ function FlatListH({
   initialPageIndex,
   renderItem,
   onPageChange,
+  onNearEnd,
 }: {
   pages: PageGroup[];
   windowWidth: number;
   initialPageIndex: number;
   renderItem: (info: { item: PageGroup }) => React.ReactElement;
   onPageChange: (page: number) => void;
+  onNearEnd: () => void;
 }) {
   const viewedRef = useRef<number | null>(null);
   // RN يمنع تغيير onViewableItemsChanged/viewabilityConfig بين الرندرات —
   // تُثبّتان في refs مرة واحدة (وإلا انهار القارئ بـ Invariant Violation).
   const onPageChangeRef = useRef(onPageChange);
   onPageChangeRef.current = onPageChange;
+  const onNearEndRef = useRef(onNearEnd);
+  onNearEndRef.current = onNearEnd;
   const viewabilityConfigRef = useRef({ itemVisiblePercentThreshold: 60 });
   const onViewableItemsChangedRef = useRef(({ viewableItems }: { viewableItems: Array<{ item: unknown }> }) => {
     const first = viewableItems[0]?.item as PageGroup | undefined;
@@ -615,6 +777,8 @@ function FlatListH({
       })}
       onViewableItemsChanged={onViewableItemsChangedRef.current}
       viewabilityConfig={viewabilityConfigRef.current}
+      onEndReached={() => onNearEndRef.current()}
+      onEndReachedThreshold={0.35}
       renderItem={(info) => (
         <View style={{ width: windowWidth }}>
           {renderItem(info)}
@@ -625,8 +789,7 @@ function FlatListH({
 }
 
 const styles = StyleSheet.create({
-  // ارتفاع محدد لمحتوى القارئ — بدون flex:1 هنا تنهار منطقة الصفحات إلى
-  // صفر (onLayout لا يعود بأبعاد) فتبقى الصفحة فارغة بلا أي خطأ.
+  // ارتفاع محدد لمحتوى القارئ — بدون flex:1 هنا تنهار منطقة الصفحات إلى صفر.
   readerContent: { flex: 1 },
   readerHeader: { alignItems: 'center', flexDirection: 'row-reverse', justifyContent: 'space-between', marginBottom: spacing.md },
   readerTitle: { alignItems: 'center', flex: 1 },
@@ -641,6 +804,8 @@ const styles = StyleSheet.create({
   pageContainer: { flex: 1 },
   pageScroll: { flex: 1 },
   pageInner: { flexGrow: 1, paddingHorizontal: spacing.xs, paddingTop: spacing.sm },
+  surahStartBanner: { alignItems: 'center', marginBottom: spacing.xs },
+  surahStartName: { fontSize: typography.bodySmall, fontWeight: '700' },
   mushafText: { textAlign: 'right', writingDirection: 'rtl' },
   ayahSpan: {},
   ayahMarker: { color: '#B8860B' },

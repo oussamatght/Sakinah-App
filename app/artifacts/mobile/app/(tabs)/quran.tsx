@@ -114,6 +114,18 @@ export default function QuranScreen() {
     });
   };
 
+  /** فتح صفحة مصحف محددة: نفس قاموس السور، مع pageNum لتحديد الصفحة بالضبط. */
+  const openPage = (page: number, surahId: number, surahName?: string) => {
+    router.push({
+      pathname: '/quran-reader',
+      params: {
+        surahId: String(surahId),
+        pageNum: String(page),
+        ...(surahName ? { surah: surahName } : {}),
+      },
+    });
+  };
+
   const tabs: Array<{ key: TabKey; label: string }> = [
     { key: 'surahs', label: 'السور' },
     { key: 'juz', label: 'الأجزاء' },
@@ -247,7 +259,7 @@ export default function QuranScreen() {
               testID={`page-${item.page}`}
               accessibilityRole="button"
               accessibilityLabel={`فتح الصفحة ${item.page}`}
-              onPress={() => openSurah(item.surahId, item.surahName)}
+              onPress={() => openPage(item.page, item.surahId, item.surahName)}
               style={({ pressed }) => [
                 styles.pageCell,
                 { backgroundColor: colors.card, borderColor: colors.border, opacity: pressed ? 0.65 : 1 },

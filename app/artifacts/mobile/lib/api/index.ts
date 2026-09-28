@@ -8,6 +8,7 @@ export {
   fetchQuranTafsir,
   fetchQuranJuz,
   groupQuranVersesByPage,
+  flattenSurahIntoQuranPages,
   SURAH_AYAH_COUNTS,
   nextAyahPosition,
   prevAyahPosition,

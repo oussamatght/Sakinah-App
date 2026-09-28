@@ -10,6 +10,8 @@ export type ReadingPosition = {
   surahId: number;
   surahName?: string;
   ayahNumber: number;
+  /** رقم صفحة المصحف المعروضة (اختياري للتوافق مع السجلات القديمة). */
+  pageNum?: number;
   updatedAt: string; // ISO
 };
 

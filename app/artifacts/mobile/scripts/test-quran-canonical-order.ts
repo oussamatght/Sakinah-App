@@ -1,5 +1,12 @@
-/** مشية كاملة على الترتيب القانوني 1:1 → 114:6 + رجوع كامل + حالات حدود. */
-import { SURAH_AYAH_COUNTS, nextAyahPosition, prevAyahPosition, fetchQuranSurah } from "../lib/api/quran";
+/** مشية كاملة على الترتيب القانوني 1:1 → 114:6 + رجوع كامل + حالات حدود + استمرارية الصفحات المتصلة. */
+import {
+  SURAH_AYAH_COUNTS,
+  nextAyahPosition,
+  prevAyahPosition,
+  fetchQuranSurah,
+  flattenSurahIntoQuranPages,
+  type QuranPageGroup,
+} from "../lib/api/quran";
 
 async function main() {
   const total = SURAH_AYAH_COUNTS.reduce((a, b) => a + b, 0);
@@ -35,5 +42,37 @@ async function main() {
     const ok = surah.verses.length === SURAH_AYAH_COUNTS[s - 1];
     console.log("surah " + s + ": live=" + surah.verses.length + " canonical=" + SURAH_AYAH_COUNTS[s - 1] + (ok ? " ✓" : " ✗"));
   }
+
+  // ---- استمرارية المصحف المتصل: دمج سورتين متجاورتين حيًا ثم فحص التتابع ----
+  // القاعدة: آخر آية في مسار الصفحات المدموج يجب أن تليها آية الترتيب القانوني
+  // التالية تمامًا (لا تخطي ولا ازدواج عبر حدود الصفحات/السور).
+  const tirmidhiPair = [112, 113] as const; // الإخلاص (صفحة 604) ثم الفلق
+  const s1 = await fetchQuranSurah(tirmidhiPair[0]);
+  const s2 = await fetchQuranSurah(tirmidhiPair[1]);
+  let flat: QuranPageGroup[] = [];
+  flat = flattenSurahIntoQuranPages(flat, s1);
+  flat = flattenSurahIntoQuranPages(flat, s2);
+  const orderedVerses = flat.flatMap((g) => g.verses);
+  const keys = orderedVerses.map((v) => v.verseKey);
+  const uniqueKeys = new Set(keys).size === keys.length;
+  const expectedChain: string[] = [];
+  let pos2: { surah: number; ayah: number } | null = { surah: tirmidhiPair[0], ayah: 1 };
+  const endPos = { surah: tirmidhiPair[1], ayah: SURAH_AYAH_COUNTS[tirmidhiPair[1] - 1] };
+  while (pos2) {
+    expectedChain.push(pos2.surah + ":" + pos2.ayah);
+    if (pos2.surah === endPos.surah && pos2.ayah === endPos.ayah) break;
+    pos2 = nextAyahPosition(pos2);
+  }
+  const chainMatch = keys.length === expectedChain.length && keys.every((k, i) => k === expectedChain[i]);
+  console.log("flatten_112_113: pages=" + flat.map((g) => g.page).join(",") + " verses=" + keys.length + " unique=" + uniqueKeys + " chain=" + (chainMatch ? "✓" : "✗"));
+  if (!chainMatch) {
+    console.log("  expected=" + expectedChain.join(","));
+    console.log("  actual  =" + keys.join(","));
+  }
+  // صفحة 604: نهاية القرآن — 4 آيات إخلاص + 5 فلق = 9 (هكذا في مصحف المدenery)
+  const p604 = flat.find((g) => g.page === 604);
+  const p604keys = p604 ? p604.verses.map((v) => v.verseKey).join(",") : "";
+  const p604ok = p604keys === "112:1,112:2,112:3,112:4,113:1,113:2,113:3,113:4,113:5";
+  console.log("page604=" + (p604 ? p604.verses.length + " ayahs ترتيب=" + (p604ok ? "✓" : "✗ " + p604keys) : "مفقودة ✗"));
 }
 void main();

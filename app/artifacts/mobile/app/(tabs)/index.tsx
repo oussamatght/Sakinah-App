@@ -31,6 +31,7 @@ export default function HomeScreen() {
       params: {
         surahId: String(target.surahId),
         ...(target.surahName ? { surah: target.surahName } : {}),
+        ...(target.ayahNumber && target.ayahNumber > 1 ? { ayah: String(target.ayahNumber) } : {}),
       },
     });
   };
