@@ -5,7 +5,7 @@
  * المزوّد تبقى undefined ولا تُستبدل بنصوص اصطناعية.
  */
 
-export type IslamicLibrarySource = "turath" | "islamhouse";
+export type IslamicLibrarySource = "turath" | "islamhouse" | "islamicapp";
 
 /** قدرات الكتاب — ما يوفره المصدر فعلًا فقط، حتى لا تظهر أزرار ميتة. */
 export type IslamicBookCapabilities = {
@@ -23,6 +23,12 @@ export type IslamicBookCapabilities = {
   canStoreOffline: boolean;
   /** إعادة جلب لآخر تحديث. */
   canUpdate: boolean;
+  /**
+   * وحد التنقّل هو **الفصل** لا الصفحة (islamic.app: ‎/text يُعطي فصولًا،
+   * وأرقام الصفحات فيها متفرّقة). القارئ عندها يتنقّل بين صفحات بداية
+   * الفصول، فلا يعرض نفس النص على أرقام صفحات متجاورة.
+   */
+  readsByChapter?: boolean;
 };
 
 export const TURATH_CAPABILITIES: IslamicBookCapabilities = {
@@ -63,6 +69,39 @@ export const ISLAMHOUSE_SEARCH_CAPABILITIES: BookSearchCapabilities = {
   canFilterByAuthorName: false,
   canFilterByTitle: false,
   textSearchIsLocal: true,
+  requiresTextTerm: false,
+};
+
+/**
+ * islamic.app (api.islamic.app/v1/library) — تحقّق حيّ 2026-09:
+ *  - /library/genres                     → 11 تصنيفًا مع عدد كتب ✅
+ *  - /library/books?genre=&author=&school= → فلترة على الخادم ✅ + ترقيم
+ *  - /library/search?q=                 → بحث دلالي على الخادم ✅
+ *  - /library/authors                   → 332 مؤلفًا + كتبهم ✅
+ *  - /library/books/{slug}/chapters|…/text|/file?format=pdf ✅
+ *  - لا فلترة بالنص على /books وحده (q غير مُفعَّل: total يبقى 563) ❌
+ */
+export const ISLAMICAPP_CAPABILITIES: IslamicBookCapabilities = {
+  canReadOnline: true,
+  // ‎/text موجود (متحقَّق: تفسير 203 صفحات ⇒ 153 فصلًا بنصّ)، والصفحات
+  // تُشتقّ منه محليًّا. لكن has_text **لكل كتاب على حدة**، فبعض الكتب PDF
+  // فقط ⇒ تُخفى القراءة في الشاشة حسب `book.hasText` لا حسب المزوّد.
+  canReadByPage: true,
+  canGetChapters: true,
+  canSearchInside: false,
+  canDownload: true,
+  canStoreOffline: true,
+  canUpdate: true,
+  readsByChapter: true,
+};
+
+export const ISLAMICAPP_SEARCH_CAPABILITIES: BookSearchCapabilities = {
+  canSearchText: true,
+  canFilterByCategory: true,
+  canFilterByAuthorId: true,
+  canFilterByAuthorName: false,
+  canFilterByTitle: false,
+  textSearchIsLocal: false,
   requiresTextTerm: false,
 };
 
@@ -111,6 +150,11 @@ export type IslamicBook = {
   language?: string;
   pages?: number;
   infoLong?: string;
+  /**
+   * هل نصّ الكتاب متاح للقراءة داخل التطبيق؟ (islamic.app: ‎has_text لكل كتاب)
+   * نعتمد عليه في إظهار زر «ابدأ القراءة» بدل قدرة المزوّد الثابتة.
+   */
+  hasText?: boolean;
   /** صفحة داخل الكتاب (نتائج البحث الداخلي تراث). */
   sourcePage?: number;
 };
@@ -142,6 +186,8 @@ export type IslamicBookSearchResult = {
   perPage: number;
   total: number;
   hasMore: boolean;
+  /** تقرير صريح: ماذا جرى على خادم المصدر وماذا تصفّى محليًا. */
+  notices?: BookSearchNotice[];
 };
 
 /* -------------------------------------------------------------------------- */

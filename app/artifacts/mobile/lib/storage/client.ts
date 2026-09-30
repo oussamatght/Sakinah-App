@@ -20,8 +20,11 @@ export async function readJson<T>(key: string): Promise<T | null> {
 export async function writeJson<T>(key: string, value: T): Promise<void> {
   try {
     await AsyncStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Storage full or unavailable — fail silently; the app remains usable.
+  } catch (error) {
+    // التخزين ممتلئ أو غير متاح: التطبيق يبقى صالحًا، لكن يجب أن يظهر السبب
+    // في السجلّ: صمتُ الفشل كان يخفي سبب تعطّل "العمل بدون إنترنت"
+    // (كاش المواقيت مثلًا لا يُكتب أصلًا فيبقى فارغًا إلى الأبد).
+    console.warn(`[storage] failed to write "${key}"`, error);
   }
 }
 

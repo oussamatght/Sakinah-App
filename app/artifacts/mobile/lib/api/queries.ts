@@ -53,7 +53,12 @@ import {
   storeLocalTafsir,
 } from "../offline/quranDb";
 import { storeHadiths } from "../offline/hadithDb";
-import { getPrayerTimesCache, savePrayerTimesCache } from "../storage/prayerCache";
+import {
+  getPrayerTimesCache,
+  savePrayerTimesCache,
+  type CachedPrayerTimes,
+} from "../storage/prayerCache";
+import { UpstreamError } from "./types";
 import type {
   HadithBook,
   HadithCategoryNode,
@@ -173,6 +178,16 @@ export function useGetAyahAudio(
     enabled: Boolean(ayahNumber) && surahId >= 1 && surahId <= 114,
     staleTime: HALF_DAY,
     gcTime: DAY,
+    /**
+     * لا إعادة محاولة عند انقطاع الشبكة: صوت الآية يُطلب بالضغط على الآية، فتصير
+     * 3 محاولات × عدة آيات = طلبات مطروحة بلا فائدة + استثناءات مرفوضة.
+     * مع `retry: 0` ينتقل الاستعلام لحالة الخطأ فورًا ويعرض المستخدم رسالة
+     * واضحة بدل "Uncaught (in promise)".
+     */
+    retry: (failureCount, error) => {
+      if (error instanceof UpstreamError && error.offline) return false;
+      return failureCount < 1;
+    },
   });
 }
 
@@ -230,6 +245,20 @@ export const prayerKeys = {
     ["prayer", latitude, longitude, date ?? null] as const,
 };
 
+/** يحوّل الكاش المحفوظ إلى نفس شكل نتيجة الشبكة مع وسم cached لعرض التنبيه. */
+function toCachedPrayerTimes(
+  cached: CachedPrayerTimes,
+): PrayerTimesResult & { cached: boolean } {
+  return {
+    date: cached.date,
+    hijriDate: cached.hijriDate,
+    timezone: "—",
+    location: cached.location,
+    timings: cached.timings,
+    cached: true,
+  };
+}
+
 export function useGetPrayerTimes(
   params: PrayTimesParams,
   options?: { query?: { enabled?: boolean } },
@@ -241,6 +270,20 @@ export function useGetPrayerTimes(
     // Offline fallback (Task 8): on network failure, return the last cached
     // result (marked cached: true) instead of an error. On success, cache it.
     queryFn: async () => {
+      /**
+       * بدون اتصال: نُعيد آخر مواقيت محفوظة فورًا دون انتظار فشل الشبكة
+       * (المهلة 20 ثانية × محاولات إعادة الجلب كانت تُظهر "تعذر التحميل"
+       * على المستخدم رغم وجود كاش صالح). ثم نجلب من الشبكة لو تحسّن الاتصال.
+       */
+      const nav =
+        typeof navigator !== "undefined"
+          ? (navigator as Navigator | undefined)
+          : undefined;
+      if (nav && nav.onLine === false) {
+        const cached = await getPrayerTimesCache();
+        if (cached) return toCachedPrayerTimes(cached);
+      }
+
       try {
         const fresh = await fetchPrayerTimes(latitude, longitude, date);
         await savePrayerTimesCache({
@@ -253,16 +296,7 @@ export function useGetPrayerTimes(
         return fresh;
       } catch (error) {
         const cached = await getPrayerTimesCache();
-        if (cached) {
-          return {
-            date: cached.date,
-            hijriDate: cached.hijriDate,
-            timezone: "—",
-            location: cached.location,
-            timings: cached.timings,
-            cached: true,
-          } as PrayerTimesResult & { cached: boolean };
-        }
+        if (cached) return toCachedPrayerTimes(cached);
         throw error;
       }
     },

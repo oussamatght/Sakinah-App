@@ -31,7 +31,9 @@ export default function HomeScreen() {
       params: {
         surahId: String(target.surahId),
         ...(target.surahName ? { surah: target.surahName } : {}),
-        ...(target.ayahNumber && target.ayahNumber > 1 ? { ayah: String(target.ayahNumber) } : {}),
+        ...(target.ayahNumber && target.ayahNumber > 1
+          ? { ayah: String(target.ayahNumber) }
+          : {}),
       },
     });
   };
@@ -76,6 +78,16 @@ export default function HomeScreen() {
           icon="download"
           label="تحميل القرآن"
           onPress={() => router.push("/quran-download")}
+        />
+        <QuickAction
+          icon="book-open"
+          label="الكتب"
+          onPress={() => router.push("/(tabs)/books")}
+        />
+        <QuickAction
+          icon="book-open"
+          label="الورد القرآني"
+          onPress={() => router.push("/(tabs)/quran-verses")}
         />
         <QuickAction
           icon="clock"

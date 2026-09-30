@@ -135,12 +135,20 @@ export type PrayerTimesResult = {
   timings: Record<string, string>;
 };
 
-/** Thrown by every fetcher — message is Arabic, ready to show inline. */
+/**
+ * Thrown by every fetcher — message is Arabic, ready to show inline.
+ *
+ * `offline` يحسم ما إذا كان الفشل بسبب انقطاع الشبكة فعلًا: فشل fetch يعني
+ * بسبب الشبكة فقط، أما خطأ HTTP أو JSON تالف فهو خلل في الخدمة وليس انقطاعًا.
+ * بدون هذا التمييز تُعرض رسالة "لا يوجد اتصال" على أي خطأ حتى والواي فاي شغّال.
+ */
 export class UpstreamError extends Error {
   readonly source: string;
-  constructor(source: string, message?: string) {
+  readonly offline: boolean;
+  constructor(source: string, message?: string, offline = false) {
     super(message ?? `تعذر الوصول إلى ${source}، تحقق من اتصالك وحاول مجددًا.`);
     this.name = "UpstreamError";
     this.source = source;
+    this.offline = offline;
   }
 }

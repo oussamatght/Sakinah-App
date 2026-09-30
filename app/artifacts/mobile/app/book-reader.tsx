@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
+  FlatList,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -21,7 +22,9 @@ import { useColors } from "@/hooks/useColors";
 import {
   useLibraryBookChapters,
   useLibraryBookPage,
+  usePrefetchNextBookPage,
 } from "@/hooks/useIslamicBooks";
+import { parseBookSource, providerCapabilities } from "@/lib/books";
 import type { IslamicLibrarySource } from "@/lib/books/types";
 
 function toArabicDigits(value: number | string): string {
@@ -59,9 +62,11 @@ export default function BookReader() {
     pages?: string;
   }>();
 
-  const source: IslamicLibrarySource =
-    params.source === "islamhouse" ? "islamhouse" : "turath";
+  // نفس قاعدة book-details: مصدر غير معروف ⇒ null بدل الطي على "turath"
+  // (كان يجعل قارئ تراث يطلب slug إسلاميك/إسلام هاوس فيبقى فارغًا).
+  const source = parseBookSource(params.source);
   const rawId = params.rawId ?? "";
+  const missingParams = !source || !rawId;
   const totalPages = Number.parseInt(params.pages ?? "", 10);
   const knownTotal = Number.isInteger(totalPages) && totalPages > 0;
 
@@ -74,13 +79,56 @@ export default function BookReader() {
     setIndexVisible(false);
   }, [page]);
 
-  const pageQuery = useLibraryBookPage(source, rawId || undefined, page);
-  const chaptersQuery = useLibraryBookChapters(source, rawId || undefined);
+  const typedSource = source as IslamicLibrarySource;
+  const pageQuery = useLibraryBookPage(typedSource, rawId || undefined, page);
+  const chaptersQuery = useLibraryBookChapters(typedSource, rawId || undefined);
 
-  const canGoPrevious = page > 1;
-  const canGoNext = !knownTotal || page < totalPages;
+  /**
+   * تنقّل «فصل-فصل» للمصادر التي وحدها هو الفصل (islamic.app: أرقام
+   * الصفحات متفرّقة، وعرض نفس النص على 5 و6 و7 يربك القارئ). لمصادر
+   * الصفحات (تراث) يبقى التنقّل صفحة-بصفحة فلا يُفقد أي محتوى.
+   */
+  const chapterPages = useMemo(() => {
+    const pages = (chaptersQuery.data ?? [])
+      .map((chapter) => chapter.page)
+      .filter((value) => Number.isFinite(value) && value > 0);
+    return [...new Set(pages)].sort((a, b) => a - b);
+  }, [chaptersQuery.data]);
 
-  const plainText = pageQuery.data ? htmlToText(pageQuery.data.text) : "";
+  const navigateByChapter =
+    source != null && providerCapabilities(typedSource).readsByChapter === true;
+
+  const nextTarget = useMemo(() => {
+    if (navigateByChapter) return chapterPages.find((value) => value > page);
+    if (knownTotal && page >= totalPages) return undefined;
+    return page + 1;
+  }, [navigateByChapter, chapterPages, page, knownTotal, totalPages]);
+
+  const previousTarget = useMemo(() => {
+    if (navigateByChapter) {
+      const before = chapterPages.filter((value) => value < page);
+      return before.length > 0 ? before[before.length - 1] : undefined;
+    }
+    return page > 1 ? page - 1 : undefined;
+  }, [navigateByChapter, chapterPages, page]);
+
+  const canGoPrevious = previousTarget !== undefined;
+  const canGoNext = nextTarget !== undefined;
+
+  // جلب صفحة واحدة فقط مسبقًا (لا الكتاب كاملًا) — نفس مفتاح الاستعلام، فلا
+  // يتكرر الطلب عند الضغط على «التالي».
+  usePrefetchNextBookPage({
+    enabled: rawId.length > 0 && !missingParams && canGoNext,
+    source: typedSource,
+    rawId: rawId || undefined,
+    page,
+    hasNext: canGoNext,
+  });
+
+  const plainText = useMemo(
+    () => (pageQuery.data ? htmlToText(pageQuery.data.text) : ""),
+    [pageQuery.data],
+  );
 
   return (
     <Screen scroll={false}>
@@ -132,15 +180,26 @@ export default function BookReader() {
       </View>
 
       {indexVisible && chaptersQuery.data && chaptersQuery.data.length > 0 ? (
-        <ScrollView
-          style={[styles.indexPanel, { backgroundColor: colors.card, borderColor: colors.border }]}
+        // FlatList لا ScrollView+map: فهرس تراث قد يكون آلاف العناوين،
+        // ووجوده داخل View (لا ScrollView) فلا تحذير VirtualizedList متداخل.
+        <FlatList
+          data={chaptersQuery.data}
+          // الفهرس قد يحوي عنوانين بنفس المعرّف عند تراث (عناوين مكرّرة في
+          // الشجرة) ⇒ معرّف فريد فعلًا بتركيبة المعرّف والترتيب.
+          keyExtractor={(chapter, index) => `${chapter.id}-${index}`}
+          style={[
+            styles.indexPanel,
+            { backgroundColor: colors.card, borderColor: colors.border },
+          ]}
           contentContainerStyle={styles.indexContent}
-          showsVerticalScrollIndicator={false}>
-          {chaptersQuery.data.map((chapter) => {
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={12}
+          windowSize={5}
+          removeClippedSubviews
+          renderItem={({ item: chapter }) => {
             const selected = chapter.page === page;
             return (
               <Pressable
-                key={chapter.id}
                 accessibilityRole="button"
                 accessibilityLabel={`الانتقال إلى ${chapter.title}`}
                 onPress={() => setPage(chapter.page)}
@@ -159,19 +218,51 @@ export default function BookReader() {
                 </Text>
               </Pressable>
             );
-          })}
-        </ScrollView>
+          }}
+        />
       ) : null}
 
-      {pageQuery.isPending ? <LoadingState label="جاري تحميل الصفحة…" /> : null}
-      {pageQuery.isError ? (
+      {missingParams ? (
+        <ErrorState
+          message="رابط الكتاب غير مكتمل (المصدر أو المعرّف مفقود). أعد فتح الكتاب من قائمة الكتب."
+          onRetry={() => router.replace("/books")}
+        />
+      ) : null}
+      {!missingParams && pageQuery.isPending ? (
+        <LoadingState label="جاري تحميل الصفحة…" />
+      ) : null}
+      {!missingParams && pageQuery.isError ? (
         <ErrorState
           offline={isOfflineError(pageQuery.error)}
+          // تجاوزتَ نهاية الكتاب (صفحة بلا نص) ⇒ الرجوع للخلف أنفع من إعادة
+          // محاولة الطلب نفسه الذي لن ينجح.
+          title={page > 1 ? "لا توجد هذه الصفحة" : undefined}
+          message={
+            page > 1
+              ? "الصفحة المطلوبة فارغة؛ غالبًا تجاوزتَ آخر صفحة في الكتاب. ارجع صفحة للخلف."
+              : undefined
+          }
+          actionLabel={page > 1 ? "الرجوع للخلف" : undefined}
+          onRetry={
+            previousTarget !== undefined
+              ? () => setPage(previousTarget)
+              : () => void pageQuery.refetch()
+          }
+        />
+      ) : null}
+      {/* لا نص في هذه الصفحة (كتاب بلا فهرس/مصدر لا يوفّر صفحات) — قبل هذا
+          الشرط كانت الشاشة فارغة تمامًا بلا أي رسالة. */}
+      {!missingParams &&
+      !pageQuery.isPending &&
+      !pageQuery.isError &&
+      plainText.trim().length === 0 ? (
+        <ErrorState
+          message="لا يوجد نص متاح لهذه الصفحة من هذا المصدر. جرّب فهرس الكتاب أو حمّل ملف PDF."
           onRetry={() => void pageQuery.refetch()}
         />
       ) : null}
 
-      {pageQuery.data ? (
+      {pageQuery.data && plainText.trim().length > 0 ? (
         <>
           {/* شريط الترقيم */}
           <View style={styles.pagerTop}>
@@ -179,7 +270,9 @@ export default function BookReader() {
               accessibilityRole="button"
               accessibilityLabel="الصفحة السابقة"
               disabled={!canGoPrevious}
-              onPress={() => setPage((value) => Math.max(value - 1, 1))}
+              onPress={() => {
+                if (previousTarget !== undefined) setPage(previousTarget);
+              }}
               style={({ pressed }) => [
                 styles.pagerButton,
                 {
@@ -207,7 +300,9 @@ export default function BookReader() {
               accessibilityRole="button"
               accessibilityLabel="الصفحة التالية"
               disabled={!canGoNext}
-              onPress={() => setPage((value) => value + 1)}
+              onPress={() => {
+                if (nextTarget !== undefined) setPage(nextTarget);
+              }}
               style={({ pressed }) => [
                 styles.pagerButton,
                 {
@@ -281,8 +376,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     maxHeight: 260,
     marginBottom: spacing.sm,
-  },
-  indexContent: {
+  },  indexContent: {
     padding: spacing.xs,
   },
   chapterRow: {

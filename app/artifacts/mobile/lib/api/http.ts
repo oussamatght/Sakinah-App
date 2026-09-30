@@ -72,15 +72,18 @@ async function fetchJsonOnce<T>(
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch {
-    throw new UpstreamError(source);
+    // فشل fetch() نفسه = انقطاع شبكة فعلي (DNS/timeout/بلا إنترنت).
+    throw new UpstreamError(source, undefined, true);
   }
 
   if (!response.ok) {
+    // الخادم ردّ فعلًا ⇒ الاتصال قائم، فالخلل في الخدمة لا في الشبكة.
     throw new UpstreamError(
       source,
       response.status >= 500
         ? `${source} غير متاح مؤقتًا، حاول لاحقًا.`
         : `تعذر جلب البيانات من ${source}.`,
+      false,
     );
   }
 
@@ -88,6 +91,7 @@ async function fetchJsonOnce<T>(
     const payload: unknown = await response.json();
     return payload as T;
   } catch {
-    throw new UpstreamError(source);
+    // استجابة تالفة — الاتصال سليم، فلا داعي لرسالة "لا يوجد اتصال".
+    throw new UpstreamError(source, undefined, false);
   }
 }

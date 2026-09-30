@@ -19,6 +19,10 @@ import type {
   IslamicBookPage,
   IslamicBookSearchResult,
   IslamicLibrarySource,
+  BookSearchCapabilities,
+  BookSearchFilters,
+  BookSearchNotice,
+  BookSearchPlanStep,
 } from "./types";
 
 export type CatalogueFilters = {
@@ -36,8 +40,16 @@ export interface IslamicBooksProvider {
   readonly id: IslamicLibrarySource;
   readonly displayName: string;
   readonly capabilities: IslamicBookCapabilities;
+  /** قدرات البحث فقط — لا نعرض في الواجهة ما لا يفعله المصدر فعلًا. */
+  readonly searchCapabilities: BookSearchCapabilities;
 
   getCategories(): Promise<IslamicBookCategory[]>;
+
+  /** الفروع الحقيقية من شجرة المصدر (فروع المستوى الأول ذات ids صالحة). */
+  getCategoryBranches(): Promise<IslamicBookCategory[]>;
+
+  /** أبناء فرع بعينه (للكشف عند الطلب — لا نحمّل الشجرة كلها). */
+  getCategoryChildren(nodeId: string): Promise<IslamicBookCategory[]>;
 
   getBooks(filters?: CatalogueFilters): Promise<IslamicBookSearchResult>;
 
@@ -45,6 +57,21 @@ export interface IslamicBooksProvider {
     query: string,
     params?: BookSearchParams,
   ): Promise<IslamicBookSearchResult>;
+
+  /**
+   * البحث الموحّد (نص/عنوان/مؤلف/تصنيف/مصدر). كل مزوّد ينفّذ ما يستطيع على
+   * خادمه ويصفّي الباقي محليًا، ويُرجع تقريرًا صريحًا بما جرى.
+   */
+  searchWithFilters(
+    filters: BookSearchFilters & { page?: number; perPage?: number },
+  ): Promise<IslamicBookSearchResult>;
+
+  /** كتب مؤلف بعينه (id) — تراث بلا endpoint لهذا، فيُرجع undefined. */
+  getBooksByAuthor(
+    authorId: string,
+    page?: number,
+    perPage?: number,
+  ): Promise<IslamicBookSearchResult | undefined>;
 
   getBook(rawId: string): Promise<IslamicBook | undefined>;
 
@@ -214,4 +241,85 @@ export function uniqueById<T extends { id: string }>(items: T[]): T[] {
     out.push(item);
   }
   return out;
+}
+
+/* -------------------------------------------------------------------------- */
+/* أدوات البحث المتقدم                                                         */
+/* -------------------------------------------------------------------------- */
+
+const TASHKEEL = /[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u0640]/g;
+
+/**
+ * تطبيع عربي للمطابقة المحلية فقط: تشكيل، ألفات، تاء مربوطة.
+ * يُستخدم لتضييق نتائج خادم المصدر (مثلًا: عنوان يحتوي العبارة) — ولا يُغني
+ * أبدًا عن بحث الخادم، ولهذا نُعلنه في التقرير كـ«تصفية محلية».
+ */
+export function normalizeArabic(value: string | undefined): string {
+  if (!value) return "";
+  return value
+    .replace(TASHKEEL, "")
+    .replace(/[ٱأإآ]/g, "ا")
+    .replace(/ى/g, "ي")
+    .replace(/ة/g, "ه")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLocaleLowerCase("ar");
+}
+
+/** هل يحتوي الحقل على العبارة بعد التطبيع؟ (تطابق تجزئي، لا كلمة كاملة) */
+export function fieldMatches(
+  value: string | undefined,
+  needle: string,
+): boolean {
+  const normalizedNeedle = normalizeArabic(needle);
+  if (!normalizedNeedle) return true;
+  return normalizeArabic(value).includes(normalizedNeedle);
+}
+
+/** هل الكلمة المُدخلة معرّفًا رقميًا صالحًا؟ (تراث/إسلام هاوس يستعملان أرقامًا) */
+export function asNumericId(value: string | undefined): string | undefined {
+  const trimmed = str(value);
+  if (!trimmed) return undefined;
+  if (!/^\d+$/.test(trimmed)) return undefined;
+  const parsed = Number(trimmed);
+  return Number.isInteger(parsed) && parsed > 0 ? String(parsed) : undefined;
+}
+
+/** مولّد تقرير البحث — يبني الخطوات والقيود من قدرات المصدر المُتحقَّق منها. */
+export class SearchNoticeBuilder {
+  private readonly steps: BookSearchPlanStep[] = [];
+  private readonly limits: string[] = [];
+
+  constructor(private readonly capabilities: BookSearchCapabilities) {}
+
+  server(label: string): this {
+    this.steps.push({ label, scope: "server" });
+    return this;
+  }
+
+  client(label: string): this {
+    this.steps.push({ label, scope: "client" });
+    return this;
+  }
+
+  unsupported(label: string, reason: string): this {
+    this.steps.push({ label, scope: "unsupported" });
+    this.limits.push(reason);
+    return this;
+  }
+
+  limit(reason: string): this {
+    this.limits.push(reason);
+    return this;
+  }
+
+  build(source: IslamicLibrarySource, sourceName: string): BookSearchNotice {
+    void this.capabilities;
+    return {
+      source,
+      sourceName,
+      steps: this.steps,
+      limits: this.limits,
+    };
+  }
 }

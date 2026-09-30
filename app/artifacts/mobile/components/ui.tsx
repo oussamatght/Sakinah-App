@@ -559,29 +559,56 @@ export function EmptyState({
   return <StatusState icon="inbox" title={title} message={message} />;
 }
 
+/**
+ * هل الفشل بسبب انقطاع الشبكة فعلًا؟
+ *
+ * كان سابقًا مطابقةً على النص `/network|offline|fetch|internet|connection/`
+ * وهي تطابق كلمة "fetch" في أي رسالة، فكان أي خطأ خادم (500) أو استجابة تالفة
+ * يظهر للمستخدم كـ"لا يوجد اتصال" رغم أن الواي فاي شغّال. الآن:
+ *  1) `UpstreamError.offline` من طبقة الشبكة هو المصدر الأول للحكم.
+ *  2) `TypeError` thrown من fetch هي إشارة انقطاع قياسية.
+ *  3) `navigator.onLine === false` دليل مباشر من النظام.
+ *  4) النمط النصي الأخير محصور بعبارات انتقال صريحة (لا "fetch" ولا "timeout").
+ */
 export function isOfflineError(error: unknown): boolean {
+  if (error && typeof error === "object" && "offline" in error) {
+    return Boolean((error as { offline?: unknown }).offline);
+  }
+  if (error instanceof TypeError) return true;
+  const nav =
+    typeof navigator !== "undefined" ? (navigator as Navigator | undefined) : undefined;
+  if (nav && nav.onLine === false) return true;
   const message = error instanceof Error ? error.message : String(error ?? "");
-
-  return /network|offline|fetch|internet|connection|timeout/i.test(message);
+  return /\b(offline|network request failed|no internet|unable to connect)\b/i.test(
+    message,
+  );
 }
 
 export function ErrorState({
   offline = false,
   onRetry,
+  title,
+  message,
+  actionLabel,
 }: {
   offline?: boolean;
   onRetry?: () => void;
+  /** نصوص مخصّصة: كل خطأ له سبب مختلف (رابط ناقص، كتاب غير موجود، …) */
+  title?: string;
+  message?: string;
+  actionLabel?: string;
 }) {
   return (
     <StatusState
       icon={offline ? "wifi-off" : "alert-circle"}
-      title={offline ? "لا يوجد اتصال" : "تعذر تحميل المحتوى"}
+      title={title ?? (offline ? "لا يوجد اتصال" : "تعذر تحميل المحتوى")}
       message={
-        offline
+        message ??
+        (offline
           ? "تحقق من اتصالك بالإنترنت وحاول مرة أخرى."
-          : "حدثت مشكلة مؤقتة. حاول تحديث المحتوى."
+          : "حدثت مشكلة مؤقتة. حاول تحديث المحتوى.")
       }
-      actionLabel={onRetry ? "إعادة المحاولة" : undefined}
+      actionLabel={onRetry ? (actionLabel ?? "إعادة المحاولة") : undefined}
       onAction={onRetry}
     />
   );

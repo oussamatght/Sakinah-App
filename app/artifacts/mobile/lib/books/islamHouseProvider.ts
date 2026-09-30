@@ -1,21 +1,29 @@
 /**
  * مزوّد إسلام هاوس (API v3) — المسارات كلها مُتحقّق منها حيًا:
- *   /main/books/ar/ar/{page}/{limit}/json        قائمة كتب عامة
+ *   /main/books/ar/ar/{page}/{limit}/json        قائمة كتب عامة (links.total_items)
  *   /main/get-item/{id}/ar/json                  تفاصيل عنصر (مرفقات، مؤلفون، غلاف)
  *   /main/get-author/{id}/ar/json                مؤلف/مصدر (سيرة، عدد عناصره)
- *   /categories/showall/ar/json                  الشجرة الكاملة (id | source_id | apiurl)
- *   {apiurl} = categories/viewcat/{source_id}…   الفروع المباشرة (ذاتي-الوصف)
- *   /main/get-category-items/{nodeId}/…          عناصر التصنيف {data, links}
- *   /main/get-author-items/{authorId}/…          عناصر المؤلف {data, links}
+ *   /main/get-author-items/{id}/showall/ar/ar/{page}/{limit}/json  كتب المؤلف
+ *   /categories/showall/ar/json                  شجرة فارغة المعرّفات (id غير صالح
+ *                                               ل_get-category-items_)
+ *   /categories/viewcat/{source_id}/ar/showall/json  أبناء عقدة معرّفاتهم صالحة
+ *   /main/get-category-items/{validId}/showall/ar/ar/{page}/{limit}/json
  *
- * «البحث النصي» غير موجود في إصدار API هذا (مُتحقّق: لا نقطة بحث نصي).
- * البحث هنا = تصفية محلية على صفحات القوائم/التصنيفات التي قدمها المصدر.
- * التصنيفات تُتصفح عبر سلسلة: الشجرة → get-category-items، وعندما لا يحمل
- * تصنيف عناصر مباشرة نوسّعه عبر فروعه (viewcat) — بلا أي مسار مخترع.
+ * «البحث النصي» غير موجود في إصدار API هذا (مُتحقّق: /main/search = 404)،
+ * ولا يوجد بحث بالعنوان ولا lookup باسم المؤلف. لذلك:
+ *  - التصنيف والمؤلف(id)  → فلترة **على الخادم**.
+ *  - أي نص → تصفية محلية **محدودة** على ما أعناه المصدر، تُعلن للمستخدم.
+ *
+ * ملاحظة مهمّة تحقّقت منها حيًا: معرّفات /categories/showall ليست في فضاء
+ * المعرّفات نفسه معرّفات viewcat، وأي معرّف من showall يُرجع «لا عناصر» دائمًا
+ * عند get-category-items. الفروع الحقيقية (١٦ فرعًا) تأتي من viewcat الخاص
+ * بجذر الشجرة، وهي التي نستخدمها للتصفح.
  */
 
 import {
+  asNumericId,
   fetchJsonRetry,
+  fieldMatches,
   httpsUrl,
   idString,
   isJsonRecord,
@@ -24,14 +32,16 @@ import {
   paginationOf,
   safeLimit,
   safePage,
+  SearchNoticeBuilder,
   str,
   uniqueById,
   type BookSearchParams,
   type CatalogueFilters,
   type IslamicBooksProvider,
 } from "./providers";
-import { ISLAMHOUSE_CAPABILITIES } from "./types";
+import { ISLAMHOUSE_CAPABILITIES, ISLAMHOUSE_SEARCH_CAPABILITIES } from "./types";
 import type {
+  BookSearchFilters,
   IslamicBook,
   IslamicBookAttachment,
   IslamicBookAuthor,
@@ -44,7 +54,12 @@ import type {
 
 const ISLAMHOUSE_API = "https://api3.islamhouse.com/v3/paV29H2gm56kvLPy";
 
+/** جذر شجرة التصنيفات — معرّفه مُتحقَّق منه (يُكتشف بالعنوان لا بمعرّف مخترع). */
+const CATEGORY_TREE_ROOT_TITLE = "شجرة التصنيفات";
+
+/** حدّ_pages المفحوصة نصيًا محليًا (لا نحمّل المكتبة كاملة). */
 const MAX_SEARCH_SCAN_PAGES = 3;
+const SEARCH_SCAN_PAGE_SIZE = 50;
 
 type IhItemRaw = Record<string, unknown>;
 
@@ -108,8 +123,13 @@ export class IslamHouseBooksProvider implements IslamicBooksProvider {
   readonly id = "islamhouse" as const;
   readonly displayName = "إسلام هاوس";
   readonly capabilities = ISLAMHOUSE_CAPABILITIES;
+  readonly searchCapabilities = ISLAMHOUSE_SEARCH_CAPABILITIES;
 
   private categoriesPromise?: Promise<IslamicBookCategory[]>;
+  /** معرّف → عقدة (مع رابط أبناءها) — يبنيه showall/viewcat عند المرور. */
+  private nodes = new Map<string, IslamicBookCategory>();
+  private branchesPromise?: Promise<IslamicBookCategory[]>;
+  private childrenPromises = new Map<string, Promise<IslamicBookCategory[]>>();
 
   async getCategories(): Promise<IslamicBookCategory[]> {
     if (!this.categoriesPromise) {
@@ -118,23 +138,98 @@ export class IslamHouseBooksProvider implements IslamicBooksProvider {
           `${ISLAMHOUSE_API}/categories/showall/ar/json`,
           "تصنيفات إسلام هاوس",
         );
-        return (Array.isArray(payload) ? payload : [])
+        const categories = (Array.isArray(payload) ? payload : [])
           .filter(isJsonRecord)
-          .map((raw) => ({
-            id: idString(raw.id) ?? "",
-            source: "islamhouse" as const,
-            title: str(raw.title) ?? "",
-            description: str(raw.shortdescription) ?? str(raw.description),
-            parentId:
-              raw.parent_id === null || raw.parent_id === undefined
-                ? null
-                : String(raw.parent_id),
-            itemsUrl: str(raw.apiurl),
-          }))
+          .map((raw) => {
+            const category: IslamicBookCategory = {
+              id: idString(raw.id) ?? "",
+              source: "islamhouse" as const,
+              title: str(raw.title) ?? "",
+              description: str(raw.shortdescription) ?? str(raw.description),
+              parentId:
+                raw.parent_id === null || raw.parent_id === undefined
+                  ? null
+                  : String(raw.parent_id),
+              itemsUrl: str(raw.apiurl),
+            };
+            if (category.id) this.nodes.set(category.id, category);
+            return category;
+          })
           .filter((category) => category.id && category.title);
+        return categories;
       })();
     }
     return this.categoriesPromise;
+  }
+
+  /**
+   * الفروع الحقيقية من viewcat الخاص بجذر الشجرة — معرّفاتها الصالحة
+   * ل get-category-items. طلب واحد، مُخزَّن.
+   */
+  async getCategoryBranches(): Promise<IslamicBookCategory[]> {
+    if (!this.branchesPromise) {
+      this.branchesPromise = (async () => {
+        const categories = await this.getCategories();
+        const root = categories.find(
+          (category) => category.title.trim() === CATEGORY_TREE_ROOT_TITLE,
+        );
+        if (!root?.itemsUrl) return [];
+
+        const payload = await fetchJsonRetry<unknown>(
+          root.itemsUrl,
+          "تصنيفات إسلام هاوس",
+        );
+        return this.registerChildren(root.id, payload);
+      })();
+    }
+    return this.branchesPromise;
+  }
+
+  /** أبناء فرع بعينه — يُجلب عند الطلب فقط (لا نحمّل ٤٨٩٩ عقدة). */
+  async getCategoryChildren(nodeId: string): Promise<IslamicBookCategory[]> {
+    const id = str(nodeId);
+    if (!id) return [];
+
+    const cached = this.childrenPromises.get(id);
+    if (cached) return cached;
+
+    const promise = (async () => {
+      const node = this.nodes.get(id);
+      if (!node?.itemsUrl) return [];
+      const payload = await fetchJsonRetry<unknown>(
+        node.itemsUrl,
+        "تصنيفات إسلام هاوس",
+      );
+      return this.registerChildren(id, payload);
+    })();
+
+    this.childrenPromises.set(id, promise);
+    return promise;
+  }
+
+  private registerChildren(
+    parentId: string,
+    payload: unknown,
+  ): IslamicBookCategory[] {
+    const raw = Array.isArray(payload) ? payload : itemsOf(payload);
+    const children: IslamicBookCategory[] = [];
+    for (const entry of raw) {
+      if (!isJsonRecord(entry)) continue;
+      const id = idString(entry.id);
+      const title = str(entry.title);
+      if (!id || !title) continue;
+      const child: IslamicBookCategory = {
+        id,
+        source: "islamhouse" as const,
+        title,
+        description: str(entry.shortdescription) ?? str(entry.description),
+        parentId,
+        itemsUrl: str(entry.apiurl),
+      };
+      this.nodes.set(id, child);
+      children.push(child);
+    }
+    return children;
   }
 
   async getBooks(filters?: CatalogueFilters): Promise<IslamicBookSearchResult> {
@@ -239,9 +334,9 @@ export class IslamHouseBooksProvider implements IslamicBooksProvider {
     const needle = q.toLocaleLowerCase("ar");
     const scanned: IslamicBook[] = [];
     for (let current = 1; current <= MAX_SEARCH_SCAN_PAGES; current += 1) {
-      const batch = await this.fetchGlobalBooks(current, 50);
+      const batch = await this.fetchGlobalBooks(current, SEARCH_SCAN_PAGE_SIZE);
       scanned.push(...batch.items);
-      if (batch.items.length < 50) break;
+      if (batch.items.length < SEARCH_SCAN_PAGE_SIZE) break;
     }
 
     const filtered = uniqueById(scanned).filter((book) =>
@@ -259,6 +354,162 @@ export class IslamHouseBooksProvider implements IslamicBooksProvider {
       perPage,
       total: filtered.length,
       hasMore: start + perPage < filtered.length,
+    };
+  }
+
+  /** كتب مؤلف بعينه — نقطة حقيقية (get-author-items) بترقيم و links. */
+  async getBooksByAuthor(
+    authorId: string,
+    page = 1,
+    perPage = 20,
+  ): Promise<IslamicBookSearchResult | undefined> {
+    const id = asNumericId(authorId);
+    if (!id) return undefined;
+
+    const safePageNumber = safePage(page);
+    const limit = safeLimit(perPage);
+    const payload = await fetchJsonRetry<unknown>(
+      `${ISLAMHOUSE_API}/main/get-author-items/${encodeURIComponent(id)}/showall/ar/ar/${safePageNumber}/${limit}/json`,
+      "كتب مؤلف إسلام هاوس",
+    );
+
+    if (isJsonRecord(payload) && typeof payload.error === "string") {
+      return {
+        items: [],
+        page: safePageNumber,
+        perPage: limit,
+        total: 0,
+        hasMore: false,
+      };
+    }
+
+    const rawItems = itemsOf(payload).filter(isJsonRecord).map(normalizeItem);
+    const items = uniqueById(rawItems.filter(isBook));
+    const links = paginationOf(payload);
+    const total = links.total ?? items.length;
+    const hasMore =
+      links.currentPage !== undefined && links.pages !== undefined
+        ? links.currentPage < links.pages
+        : safePageNumber * limit < total;
+
+    return { items, page: safePageNumber, perPage: limit, total, hasMore };
+  }
+
+  /**
+   * البحث الموحّد — بصدق تام:
+   *  - تصنيف أو مؤلف(id) بلا نص → **كله على الخادم** (get-category-items /
+   *    get-author-items) بترقيم حقيقي.
+   *  - أي نص → لا endpoint نصي (404 مُتحقَّق) ⇒ تصفية محلية على عدد محدود من
+   *    الصفحات التي أعناها المصدر، مع إعلان الحدّ للمستخدم.
+   */
+  async searchWithFilters(
+    filters: BookSearchFilters & { page?: number; perPage?: number },
+  ): Promise<IslamicBookSearchResult> {
+    const page = safePage(filters.page);
+    const perPage = safeLimit(filters.perPage);
+    const mode = filters.mode ?? "free";
+    const notice = new SearchNoticeBuilder(this.searchCapabilities);
+
+    const query = str(filters.query);
+    const authorText = str(filters.author);
+    const categoryId = str(filters.categoryId);
+    const authorId = asNumericId(authorText);
+    const textTerm = mode === "author" ? (authorText ?? undefined) : (query ?? undefined);
+
+    if (categoryId) notice.server("التصنيف (get-category-items)");
+    if (authorId) notice.server("المؤلف (get-author-items)");
+    if (authorText && !authorId) {
+      notice.unsupported(
+        "المؤلف نصيًا",
+        "إسلام هاوس لا يوفّر بحثًا باسم المؤلف ولا يحوّل الاسم إلى معرّف؛ أدخل معرّف المؤلف الرقمي للفلترة الحقيقية على الخادم.",
+      );
+    }
+    if (mode === "title" && query) {
+      notice.unsupported(
+        "البحث باسم الكتاب",
+        "إسلام هاوس لا يوفّر بحثًا بالعنوان؛ التصفية هنا على نتائج التصنيف/القائمة فقط.",
+      );
+    }
+    if (textTerm) {
+      notice.client(
+        `بحث نصي محلي (${MAX_SEARCH_SCAN_PAGES * SEARCH_SCAN_PAGE_SIZE} كتابًا من قائمة المصدر)`,
+      );
+    }
+
+    if (authorId) {
+      const byAuthor = await this.getBooksByAuthor(authorId, page, perPage);
+      if (byAuthor) {
+        if (textTerm) {
+          const filtered = byAuthor.items.filter((book) =>
+            fieldMatches(`${book.title} ${book.description ?? ""}`, textTerm),
+          );
+          return {
+            ...byAuthor,
+            items: filtered,
+            notices: [notice.build(this.id, this.displayName)],
+          };
+        }
+        return { ...byAuthor, notices: [notice.build(this.id, this.displayName)] };
+      }
+    }
+
+    if (categoryId) {
+      const byCategory = await this.browseCategory(categoryId, page, perPage);
+      if (textTerm) {
+        const filtered = byCategory.items.filter((book) =>
+          mode === "title"
+            ? fieldMatches(book.title, textTerm)
+            : fieldMatches(
+                `${book.title} ${book.author ?? ""} ${book.description ?? ""}`,
+                textTerm,
+              ),
+        );
+        return {
+          ...byCategory,
+          items: filtered,
+          notices: [notice.build(this.id, this.displayName)],
+        };
+      }
+      return { ...byCategory, notices: [notice.build(this.id, this.displayName)] };
+    }
+
+    if (!textTerm) {
+      notice.limit("اختر كلمة بحث أو تصنيفًا أو معرّف مؤلف.");
+      return {
+        items: [],
+        page,
+        perPage,
+        total: 0,
+        hasMore: false,
+        notices: [notice.build(this.id, this.displayName)],
+      };
+    }
+
+    // لا نص ولا تصنيف ولا مؤلف → تصفية محلية على أول ١٥٠ كتابًا فقط.
+    const scanned: IslamicBook[] = [];
+    for (let current = 1; current <= MAX_SEARCH_SCAN_PAGES; current += 1) {
+      const batch = await this.fetchGlobalBooks(current, SEARCH_SCAN_PAGE_SIZE);
+      scanned.push(...batch.items);
+      if (batch.items.length < SEARCH_SCAN_PAGE_SIZE) break;
+    }
+
+    const filtered = uniqueById(scanned).filter((book) => {
+      if (mode === "title") return fieldMatches(book.title, textTerm);
+      if (mode === "author") return fieldMatches(book.author, textTerm);
+      return fieldMatches(
+        `${book.title} ${book.author ?? ""} ${book.description ?? ""}`,
+        textTerm,
+      );
+    });
+
+    const start = (page - 1) * perPage;
+    return {
+      items: filtered.slice(start, start + perPage),
+      page,
+      perPage,
+      total: filtered.length,
+      hasMore: start + perPage < filtered.length,
+      notices: [notice.build(this.id, this.displayName)],
     };
   }
 

@@ -13,8 +13,11 @@ import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
+  useLibraryAdvancedSearch,
   useLibraryBookList,
   useLibraryCategories,
+  useLibraryCategoryBranches,
+  usePrefetchNextAdvancedSearchPage,
 } from "@/hooks/useIslamicBooks";
 import {
   AppHeader,
@@ -25,12 +28,33 @@ import {
   SearchBar,
 } from "@/components/ui";
 import BookCard from "@/components/BookCard";
+import BookSearchSheet, {
+  type AdvancedSearchValue,
+} from "@/components/BookSearchSheet";
+import SearchPlanNotice from "@/components/SearchPlanNotice";
 import { radii, spacing, typography } from "@/constants/tokens";
 import { useColors } from "@/hooks/useColors";
-import type { IslamicBook } from "@/lib/books/types";
+import { providerCapabilities } from "@/lib/books";
+import type { IslamicBook, IslamicLibrarySource } from "@/lib/books/types";
 
 const PAGE_SIZE = 20;
 const TAB_BAR_HEIGHT = 84;
+
+const EMPTY_ADVANCED: AdvancedSearchValue = {
+  mode: "free",
+  query: "",
+  author: "",
+  categoryId: "",
+  source: "all",
+};
+
+/** الفعل المتاح للبطاقة — مشتق من قدرات المصدر، لا من تخمين. */
+function actionLabelFor(book: IslamicBook): string {
+  const capabilities = providerCapabilities(book.source);
+  if (capabilities.canReadByPage) return "قراءة";
+  if (capabilities.canDownload && book.attachments?.length) return "PDF";
+  return "تفاصيل";
+}
 
 function toArabicDigits(value: number | string): string {
   return String(value).replace(/[0-9]/g, (digit) => "٠١٢٣٤٥٦٧٨٩"[Number(digit)]);
@@ -45,14 +69,49 @@ export default function BooksTab() {
 
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  /**
+   * التصنيف المختار = (المصدر + المعرّف). معرّفات التصنيف فضاء منفصل لكل
+   * مصدر (أرقام إسلام هاوس مقابل slugs إسلاميك)، فاختيارها بلا مصدر
+   * يخلطها ويجعل التصفية ترجع "لا عناصر".
+   */
+  const [selectedCategory, setSelectedCategory] = useState<{
+    source: IslamicLibrarySource;
+    id: string;
+    title: string;
+  } | null>(null);
   const [page, setPage] = useState(1);
 
-  const categoriesQuery = useLibraryCategories("islamhouse");
-  const categories = useMemo(
-    () => (categoriesQuery.data ?? []).filter((category) => !category.parentId),
-    [categoriesQuery.data],
-  );
+  // البحث المتقدم: مسودة منفصلة + نسخة «مُقدَّمة» لا تتغيّر إلا بضغط «بحث»
+  // (لا طلب شبكة على كل ضغطة مفتاح).
+  const [sheetVisible, setSheetVisible] = useState(false);
+  const [advanced, setAdvanced] = useState<AdvancedSearchValue>(EMPTY_ADVANCED);
+  const [appliedAdvanced, setAppliedAdvanced] =
+    useState<AdvancedSearchValue>(EMPTY_ADVANCED);
+  const [advancedPage, setAdvancedPage] = useState(1);
+
+  /**
+   * شرائح التصفّح: الفروع **الصالحة** وحدها.
+   *
+   * كانت الشريحة تستخدم categories/showall من إسلام هاوس (٤٣٧ عنصرًا) وهي
+   * معرّفات من فضاء مختلف: أي منها يُرجع "لا عناصر" دائمًا عند
+   * get-category-items، إضافةً إلى رسم مئات العناصر دفعة واحدة. الآن:
+   *  - ١٦ فرعًا حقيقيًا من إسلام هاوس (viewcat) + ١١ نوعًا من إسلاميك.
+   */
+  const islamHouseBranchesQuery = useLibraryCategoryBranches("islamhouse");
+  const islamicAppGenresQuery = useLibraryCategories("islamicapp");
+  const categories = useMemo(() => {
+    const ih = (islamHouseBranchesQuery.data ?? []).map((category) => ({
+      source: "islamhouse" as const,
+      id: category.id,
+      title: category.title,
+    }));
+    const ia = (islamicAppGenresQuery.data ?? []).map((category) => ({
+      source: "islamicapp" as const,
+      id: category.id,
+      title: category.title,
+    }));
+    return [...ih, ...ia];
+  }, [islamHouseBranchesQuery.data, islamicAppGenresQuery.data]);
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(search.trim()), 350);
@@ -63,42 +122,94 @@ export default function BooksTab() {
     setPage(1);
   }, [query, selectedCategory]);
 
+  const advancedActive =
+    appliedAdvanced.query.trim().length > 0 ||
+    appliedAdvanced.author.trim().length > 0 ||
+    appliedAdvanced.categoryId.trim().length > 0;
+
   const searching = query.length > 0;
+
+  const advancedQuery = useLibraryAdvancedSearch({
+    mode: appliedAdvanced.mode,
+    query: appliedAdvanced.query,
+    author: appliedAdvanced.author,
+    categoryId: appliedAdvanced.categoryId,
+    source: appliedAdvanced.source,
+    page: advancedPage,
+    perPage: PAGE_SIZE,
+  });
 
   const listQuery = useLibraryBookList({
     query,
-    source: "islamhouse",
-    categoryId: searching ? undefined : (selectedCategory ?? undefined),
+    source: selectedCategory?.source ?? "islamhouse",
+    categoryId: searching ? undefined : (selectedCategory?.id ?? undefined),
     page,
     perPage: PAGE_SIZE,
   });
 
-  const books = listQuery.data?.items ?? [];
+  // البحث المتقدم يتفوّق على البحث البسيط عند تطبيق فلاتر.
+  const books = advancedActive ? (advancedQuery.data?.items ?? []) : (listQuery.data?.items ?? []);
+  const activeQuery = advancedActive ? advancedQuery : listQuery;
 
-  const reportedTotal = Number(listQuery.data?.total ?? 0);
-  const reportedPerPage = Math.max(1, Number(listQuery.data?.perPage ?? PAGE_SIZE));
+  const reportedTotal = Number(activeQuery.data?.total ?? 0);
+  const reportedPerPage = Math.max(1, Number(activeQuery.data?.perPage ?? PAGE_SIZE));
   const reportedTotalPages = Math.max(
     0,
-    Number((listQuery.data as { totalPages?: number } | undefined)?.totalPages ?? 0),
+    Number((activeQuery.data as { totalPages?: number } | undefined)?.totalPages ?? 0),
   );
   const totalPages =
     reportedTotalPages > 0
       ? reportedTotalPages
       : reportedTotal > 0
         ? Math.max(1, Math.ceil(reportedTotal / reportedPerPage))
-        : Math.max(1, page);
+        : Math.max(1, advancedActive ? advancedPage : page);
 
-  const explicitHasMore = listQuery.data?.hasMore;
+  const explicitHasMore = activeQuery.data?.hasMore;
   const inferredHasMore = books.length >= reportedPerPage;
   const hasMore =
     explicitHasMore === true
       ? true
       : explicitHasMore === false
         ? false
-        : page < totalPages || inferredHasMore;
+        : (advancedActive ? advancedPage : page) < totalPages || inferredHasMore;
 
-  const canGoPrevious = page > 1 && !listQuery.isPending;
-  const canGoNext = !listQuery.isPending && !listQuery.isFetching && hasMore;
+  const currentPage = advancedActive ? advancedPage : page;
+  const goToPage = (next: number) => {
+    const target = Math.max(1, next);
+    if (advancedActive) setAdvancedPage(target);
+    else setPage(target);
+  };
+
+  const canGoPrevious = currentPage > 1 && !activeQuery.isPending;
+  const canGoNext = !activeQuery.isPending && !activeQuery.isFetching && hasMore;
+
+  // جلب صفحة النتائج التالية فقط — لا يُطلق طلبًا إضافيًا عند فتحها لاحقًا.
+  usePrefetchNextAdvancedSearchPage({
+    enabled: advancedActive && !activeQuery.isPending,
+    filters: {
+      mode: appliedAdvanced.mode,
+      query: appliedAdvanced.query,
+      author: appliedAdvanced.author,
+      categoryId: appliedAdvanced.categoryId,
+      source: appliedAdvanced.source,
+    },
+    page: advancedPage,
+    perPage: PAGE_SIZE,
+    hasMore,
+  });
+
+  const submitAdvanced = () => {
+    setAppliedAdvanced(advanced);
+    setAdvancedPage(1);
+    setSheetVisible(false);
+  };
+
+  const resetAdvanced = () => {
+    setAdvanced(EMPTY_ADVANCED);
+    setAppliedAdvanced(EMPTY_ADVANCED);
+    setAdvancedPage(1);
+    setSheetVisible(false);
+  };
 
   const openBook = (book: IslamicBook) => {
     router.push({
@@ -112,13 +223,22 @@ export default function BooksTab() {
     });
   };
 
+  const selectedCategoryTitle = useMemo(() => {
+    if (!selectedCategory) return undefined;
+    return categories.find(
+      (category) =>
+        category.source === selectedCategory.source &&
+        category.id === selectedCategory.id,
+    )?.title;
+  }, [categories, selectedCategory]);
+
   const renderPager = () => (
     <View style={styles.pager}>
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="الصفحة السابقة"
         disabled={!canGoPrevious}
-        onPress={() => setPage((value) => Math.max(value - 1, 1))}
+        onPress={() => goToPage(currentPage - 1)}
         style={({ pressed }) => [
           styles.pagerButton,
           {
@@ -136,7 +256,7 @@ export default function BooksTab() {
           { backgroundColor: colors.card, borderColor: colors.border },
         ]}>
         <Text style={[styles.pageIndicatorText, { color: colors.foreground }]}>
-          {toArabicDigits(page)}
+          {toArabicDigits(currentPage)}
         </Text>
       </View>
 
@@ -144,7 +264,7 @@ export default function BooksTab() {
         accessibilityRole="button"
         accessibilityLabel="الصفحة التالية"
         disabled={!canGoNext}
-        onPress={() => setPage((value) => value + 1)}
+        onPress={() => goToPage(currentPage + 1)}
         style={({ pressed }) => [
           styles.pagerButton,
           {
@@ -186,14 +306,20 @@ export default function BooksTab() {
       </Pressable>
 
       {categories.map((category) => {
-        const selected = selectedCategory === category.id;
+        const selected =
+          selectedCategory?.source === category.source &&
+          selectedCategory?.id === category.id;
         return (
           <Pressable
-            key={category.id}
+            key={`${category.source}:${category.id}`}
             accessibilityRole="button"
             accessibilityState={{ selected }}
             accessibilityLabel={`تصفح ${category.title}`}
-            onPress={() => setSelectedCategory(category.id)}
+            onPress={() =>
+              setSelectedCategory(
+                selected ? null : { source: category.source, id: category.id, title: category.title },
+              )
+            }
             style={[
               styles.categoryChip,
               selected && { backgroundColor: colors.primary },
@@ -221,7 +347,14 @@ export default function BooksTab() {
         data={books}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <BookCard book={item} onPress={() => openBook(item)} />
+          <BookCard
+            book={item}
+            onPress={() => openBook(item)}
+            categoryTitle={
+              advancedActive ? undefined : selectedCategoryTitle
+            }
+            actionLabel={actionLabelFor(item)}
+          />
         )}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[
@@ -242,17 +375,73 @@ export default function BooksTab() {
               onChangeText={setSearch}
             />
 
+            <Pressable
+              testID="open-advanced-search"
+              accessibilityRole="button"
+              accessibilityLabel="بحث متقدم"
+              onPress={() => setSheetVisible(true)}
+              style={({ pressed }) => [
+                styles.advancedButton,
+                {
+                  backgroundColor: advancedActive
+                    ? colors.primary
+                    : colors.secondary,
+                  borderColor: colors.border,
+                  opacity: pressed ? 0.7 : 1,
+                },
+              ]}>
+              <Feather
+                name="sliders"
+                size={16}
+                color={advancedActive ? colors.primaryForeground : colors.primary}
+              />
+              <Text
+                style={[
+                  styles.advancedButtonText,
+                  {
+                    color: advancedActive
+                      ? colors.primaryForeground
+                      : colors.primary,
+                  },
+                ]}>
+                بحث متقدم
+              </Text>
+            </Pressable>
+
+            {advancedActive ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="إلغاء الفلاتر المتقدمة"
+                onPress={resetAdvanced}
+                style={({ pressed }) => [
+                  styles.clearButton,
+                  {
+                    backgroundColor: colors.secondary,
+                    opacity: pressed ? 0.7 : 1,
+                  },
+                ]}>
+                <Text style={[styles.clearText, { color: colors.primary }]}>
+                  مسح الفلاتر المتقدمة
+                </Text>
+              </Pressable>
+            ) : null}
+
             <Text style={[styles.scopeNote, { color: colors.mutedForeground }]}>
-              {searching
-                ? "البحث يشمل مكتبة تراث ومكتبة إسلام هاوس."
-                : "التصفح عبر تصنيفات إسلام هاوس (تراث لا يقدم نقطة تصفح قائمة)."}
+              {advancedActive
+                ? "نتائج البحث المتقدم — التقرير أدناه يوضّح ما نُفِّذ على خادم كل مصدر."
+                : searching
+                  ? "البحث يشمل مكتبة تراث ومكتبة إسلام هاوس ومكتبة إسلاميك."
+                  : "التصفح عبر تصنيفات إسلام هاوس وتصنيفات إسلاميك (تراث لا يقدم نقطة تصفح قائمة)."}
             </Text>
 
-            {!searching ? (
+            {advancedActive ? (
+              <SearchPlanNotice notices={advancedQuery.data?.notices} />
+            ) : null}
+
+            {!advancedActive && !searching ? (
               <>
-                {categoriesQuery.isPending ? null : null}
                 {renderCategories()}
-                {categoriesQuery.isError ? (
+                {islamHouseBranchesQuery.isError && islamicAppGenresQuery.isError ? (
                   <Text
                     style={[styles.scopeNote, { color: colors.mutedForeground }]}>
                     تعذر تحميل التصنيفات — يمكنك تصفح قائمة الكتب مباشرة.
@@ -261,20 +450,25 @@ export default function BooksTab() {
               </>
             ) : null}
 
-            {listQuery.isError ? (
+            {activeQuery.isError ? (
               <ErrorState
-                offline={isOfflineError(listQuery.error)}
-                onRetry={() => void listQuery.refetch()}
+                offline={isOfflineError(activeQuery.error)}
+                onRetry={() => void activeQuery.refetch()}
               />
             ) : null}
 
-            {!listQuery.isPending && books.length > 0 ? renderPager() : null}
+            {!activeQuery.isPending && books.length > 0 ? renderPager() : null}
           </View>
         }
         ListEmptyComponent={
-          listQuery.isPending ? (
+          activeQuery.isPending ? (
             <LoadingState label="جاري تحميل الكتب…" />
-          ) : listQuery.isError ? null : (
+          ) : activeQuery.isError ? null : advancedActive ? (
+            <EmptyState
+              title="لم نجد نتائج"
+              message="جرّب تعديل الفلاتر أو اختر مصدرًا آخر — بعض المصادر لا تدعم كل الفلاتر."
+            />
+          ) : (
             <EmptyState
               title={searching ? "لم نجد نتائج" : "لا توجد كتب"}
               message={
@@ -286,8 +480,17 @@ export default function BooksTab() {
           )
         }
         ListFooterComponent={
-          !listQuery.isPending && books.length > 0 ? renderPager() : null
+          !activeQuery.isPending && books.length > 0 ? renderPager() : null
         }
+      />
+
+      <BookSearchSheet
+        visible={sheetVisible}
+        value={advanced}
+        onChange={setAdvanced}
+        onClose={() => setSheetVisible(false)}
+        onSubmit={submitAdvanced}
+        onReset={resetAdvanced}
       />
     </View>
   );
@@ -305,6 +508,32 @@ const styles = StyleSheet.create({
     fontSize: typography.caption,
     marginTop: spacing.xs,
     textAlign: "right",
+  },
+  advancedButton: {
+    alignItems: "center",
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    flexDirection: "row-reverse",
+    gap: 6,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 9,
+    alignSelf: "flex-start",
+  },
+  advancedButtonText: {
+    fontSize: typography.bodySmall,
+    fontWeight: "700",
+  },
+  clearButton: {
+    alignSelf: "flex-start",
+    borderRadius: radii.pill,
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+  },
+  clearText: {
+    fontSize: typography.caption,
+    fontWeight: "700",
   },
   categoryRow: {
     flexDirection: "row-reverse",

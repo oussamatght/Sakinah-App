@@ -53,6 +53,32 @@ const persister = createAsyncStoragePersister({
   throttleTime: 2_000,
 });
 
+/**
+ * استثناء نصوص المصحف من التخزين المؤقت الدائم.
+ *
+ * نصوص السور والتفسير والأجزاء ضخمة (آلاف الآيات)، وحفظها في AsyncStorage
+ * كان يتجاوز حد التخزين فيظهر عند كل إقلاع:
+ *   "Encountered an error attempting to restore client cache from persisted
+ *    location. As a precaution, the persisted cache will be discarded."
+ * فيُهمَل الكاش بالكامل ويصبح التطبيق بلا أي بيانات محفوظة — أي أن "العمل
+ * بدون إنترنت" يتعطّل. ونصوص المصحف محفوظة أصلًا في SQLite (quranDb)، وهي
+ * المسار الصحيح للقراءة بدون إنترنت، فلا نكررها هنا. القوائم والروابط
+ * الصغيرة (فهرس السور، روابط الصوت، الكتب، الأحاديث، المواقيت) تُحفظ كما هي.
+ */
+const NON_PERSISTED_QURAN_SEGMENTS = new Set(['surah', 'tafsir', 'juz']);
+
+function shouldPersistQuery(query: {
+  queryKey: readonly unknown[];
+  state: { status: string };
+}): boolean {
+  if (query.state.status !== 'success') return false;
+  const [namespace, segment] = query.queryKey;
+  if (namespace === 'quran' && typeof segment === 'string' && NON_PERSISTED_QURAN_SEGMENTS.has(segment)) {
+    return false;
+  }
+  return true;
+}
+
 function RootLayoutNav() {
   return (
     <Stack screenOptions={{ headerBackTitle: 'رجوع', headerShown: false }}>
@@ -124,7 +150,12 @@ export default function RootLayout() {
       <AppErrorBoundary>
         <PersistQueryClientProvider
           client={queryClient}
-          persistOptions={{ persister, maxAge: 1000 * 60 * 60 * 24 * 30 }}
+          persistOptions={{
+            persister,
+            maxAge: 1000 * 60 * 60 * 24 * 30,
+            buster: 'sakinah-cache-v2',
+            dehydrateOptions: { shouldDehydrateQuery: shouldPersistQuery },
+          }}
         >
           <GestureHandlerRootView>
             <KeyboardProvider>

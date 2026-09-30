@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
@@ -13,15 +13,18 @@ import {
 import { radii, spacing, typography } from "@/constants/tokens";
 import { useColors } from "@/hooks/useColors";
 import { useLibraryAuthor, useLibraryBookDetails } from "@/hooks/useIslamicBooks";
-import { providerCapabilities } from "@/lib/books";
+import { bookSourceLabel, parseBookSource, providerCapabilities } from "@/lib/books";
 import type { IslamicBookChapter, IslamicLibrarySource } from "@/lib/books/types";
+
+/** فهرس تراث قد يبلغ آلاف العناوين — نعرض دفعة ونطلب المزيد بالضغط. */
+const CHAPTERS_STEP = 25;
 
 function toArabicDigits(value: number | string): string {
   return String(value).replace(/[0-9]/g, (digit) => "٠١٢٣٤٥٦٧٨٩"[Number(digit)]);
 }
 
 function sourceLabel(source: IslamicLibrarySource): string {
-  return source === "turath" ? "تراث" : "إسلام هاوس";
+  return bookSourceLabel(source);
 }
 
 export default function BookDetails() {
@@ -35,18 +38,42 @@ export default function BookDetails() {
     author?: string;
   }>();
 
-  const source: IslamicLibrarySource =
-    params.source === "islamhouse" ? "islamhouse" : "turath";
+  // مصدر غير معروف ⇒ null (المعطيات ناقصة) بدل الطي على "turath" الذي كان
+  // يجعل إسلاميك/إسلام هاوس يُطلبان من مزوّد تراث ⇒ undefined ⇒ شاشة فارغة.
+  const source = parseBookSource(params.source);
   const rawId = params.rawId ?? "";
+  const missingParams = !source || !rawId;
 
-  const detailsQuery = useLibraryBookDetails(source, rawId || undefined);
-  const capabilities = providerCapabilities(source);
+  const detailsQuery = useLibraryBookDetails(
+    source as IslamicLibrarySource,
+    rawId || undefined,
+  );
+  const capabilities = providerCapabilities(source as IslamicLibrarySource);
 
   const book = detailsQuery.data?.book;
   const chapters = detailsQuery.data?.chapters;
 
-  const authorQuery = useLibraryAuthor(source, book?.authorId);
+  /**
+   * القراءة داخل التطبيق متاحة إن كان المزوّد يدعمها **وللكتاب نصّ**.
+   * islamic.app يوفّر has_text لكل كتاب على حدة: كتب PDF فقط يجب ألّا
+   * يُعرض لها زر «ابدأ القراءة» ثم ينتهي القارئ بصفحة فارغة.
+   */
+  const canRead = capabilities.canReadByPage && book?.hasText !== false;
+
+  const authorQuery = useLibraryAuthor(
+    source as IslamicLibrarySource,
+    book?.authorId,
+  );
   const authorBio = authorQuery.data?.biography;
+
+  const [chapterLimit, setChapterLimit] = useState(CHAPTERS_STEP);
+  // نرسم جزءًا من الفهرس فقط: map كامل داخل ScrollView يجمّد الشاشة على
+  // الكتب ذات成千يس العناوين. لا نضع FlatList داخل ScrollView (تحذير متداخل).
+  const visibleChapters = useMemo(
+    () => (chapters ?? []).slice(0, chapterLimit),
+    [chapters, chapterLimit],
+  );
+  const remainingChapters = Math.max(0, (chapters?.length ?? 0) - visibleChapters.length);
 
   const openUrl = async (url: string | undefined) => {
     if (!url) return;
@@ -55,13 +82,22 @@ export default function BookDetails() {
   };
 
   const openReader = (page = 1) => {
+    // مصدر غير معروف ⇒ لا ننتقل: `params.source = null` كان يتحوّل إلى نص
+    // "null" في الرابط فيعود القارئ بمصدر مجهول.
+    if (!source) return;
+    // نبدأ من أول صفحة ** فيها نصّ فعلًا (الفهرس قد يبدأ من صفحة 12 مثلًا)،
+    // وإلا استقبل القارئ صفحة فارغة كأنها أول صفحة في الكتاب.
+    const firstRealPage =
+      page > 1
+        ? page
+        : (visibleChapters.find((chapter) => chapter.page > 0)?.page ?? 1);
     router.push({
       pathname: "/book-reader",
       params: {
         source,
         rawId,
         title: book?.title ?? params.title ?? "",
-        page: String(page),
+        page: String(firstRealPage),
         pages: typeof book?.pages === "number" ? String(book.pages) : "",
       },
     });
@@ -83,10 +119,24 @@ export default function BookDetails() {
         </View>
       </View>
 
-      {detailsQuery.isPending ? <LoadingState label="جاري تحميل الكتاب…" /> : null}
-      {detailsQuery.isError ? (
+      {missingParams ? (
+        <ErrorState
+          message="رابط الكتاب غير مكتمل (المصدر أو المعرّف مفقود). أعد فتح الكتاب من قائمة الكتب."
+          onRetry={() => router.replace("/books")}
+        />
+      ) : null}
+      {!missingParams && detailsQuery.isPending ? (
+        <LoadingState label="جاري تحميل الكتاب…" />
+      ) : null}
+      {!missingParams && detailsQuery.isError ? (
         <ErrorState
           offline={isOfflineError(detailsQuery.error)}
+          onRetry={() => void detailsQuery.refetch()}
+        />
+      ) : null}
+      {!missingParams && !detailsQuery.isPending && !detailsQuery.isError && !book ? (
+        <ErrorState
+          message="تعذّر عرض هذا الكتاب من المصدر المحدد."
           onRetry={() => void detailsQuery.refetch()}
         />
       ) : null}
@@ -171,7 +221,7 @@ export default function BookDetails() {
               تراث → قراءة داخل التطبيق + فهرس + فتح المصدر.
               إسلام هاوس → تحميل PDF + المرفقات + فتح المصدر. */}
           <View style={styles.actions}>
-            {capabilities.canReadByPage ? (
+            {canRead ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="بدء القراءة"
@@ -230,7 +280,7 @@ export default function BookDetails() {
               </Pressable>
             ) : null}
 
-            {capabilities.canReadByPage && chapters && chapters.length > 0 ? (
+            {canRead && chapters && chapters.length > 0 ? (
               <View
                 style={[
                   styles.card,
@@ -239,9 +289,10 @@ export default function BookDetails() {
                 <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
                   الفهرس
                 </Text>
-                {chapters.map((chapter: IslamicBookChapter) => (
+                {visibleChapters.map((chapter: IslamicBookChapter, index) => (
                   <Pressable
-                    key={chapter.id}
+                    // تراث يعيد عناوين مكرّرة ⇒ مفتاح مركّب مع الترتيب.
+                    key={`${chapter.id}-${index}`}
                     accessibilityRole="button"
                     accessibilityLabel={`الانتقال إلى ${chapter.title}`}
                     onPress={() => openReader(chapter.page)}
@@ -260,6 +311,27 @@ export default function BookDetails() {
                     <Feather name="chevron-left" size={16} color={colors.mutedForeground} />
                   </Pressable>
                 ))}
+
+                {remainingChapters > 0 ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="عرض المزيد من الفهرس"
+                    onPress={() =>
+                      setChapterLimit((limit) => limit + CHAPTERS_STEP)
+                    }
+                    style={({ pressed }) => [
+                      styles.moreButton,
+                      {
+                        backgroundColor: colors.secondary,
+                        borderColor: colors.border,
+                        opacity: pressed ? 0.7 : 1,
+                      },
+                    ]}>
+                    <Text style={[styles.moreText, { color: colors.primary }]}>
+                      عرض {toArabicDigits(remainingChapters)} عنوانًا آخر
+                    </Text>
+                  </Pressable>
+                ) : null}
               </View>
             ) : null}
           </View>
@@ -468,6 +540,18 @@ const styles = StyleSheet.create({
     fontSize: typography.bodySmall,
     fontWeight: "600",
     textAlign: "right",
+  },
+  moreButton: {
+    alignItems: "center",
+    borderRadius: radii.pill,
+    borderWidth: 1,
+    marginTop: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 9,
+  },
+  moreText: {
+    fontSize: typography.caption,
+    fontWeight: "700",
   },
   attachmentRow: {
     alignItems: "center",

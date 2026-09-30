@@ -4,18 +4,30 @@ import { Feather } from "@expo/vector-icons";
 
 import { radii, spacing, typography } from "@/constants/tokens";
 import { useColors } from "@/hooks/useColors";
+import { bookSourceLabel } from "@/lib/books";
 import type { IslamicBook } from "@/lib/books/types";
 
 type Props = {
   book: IslamicBook;
   onPress: () => void;
+  /** اسم التصنيف — يُمرَّر فقط حين يكون معروفًا فعلًا (لا نخترع منه). */
+  categoryTitle?: string;
+  /** الفعل المتاح: قراءة / PDF / تفاصيل — مشتق من قدرات المصدر. */
+  actionLabel?: string;
 };
 
 function sourceLabel(source: IslamicBook["source"]): string {
-  return source === "turath" ? "تراث" : "إسلام هاوس";
+  // كان `source === "turath" ? … : "إسلام هاوس"` ⇒ كل مصدر غير تراث يُسمّى
+  // «إسلام هاوس» (إسلاميك كان يظهر باسم خاطئ). نستخدم خريطة المصادر.
+  return bookSourceLabel(source);
 }
 
-export default function BookCard({ book, onPress }: Props) {
+export default function BookCard({
+  book,
+  onPress,
+  categoryTitle,
+  actionLabel,
+}: Props) {
   const colors = useColors();
 
   return (
@@ -69,22 +81,43 @@ export default function BookCard({ book, onPress }: Props) {
         ) : null}
 
         <View style={styles.footer}>
-          <View
-            style={[
-              styles.badge,
-              {
-                backgroundColor:
-                  book.source === "turath"
-                    ? colors.accent
-                    : colors.secondary,
-              },
-            ]}>
-            <Text style={[styles.badgeText, { color: colors.primary }]}>
-              {sourceLabel(book.source)}
-            </Text>
+          <View style={styles.badgeRow}>
+            <View
+              style={[
+                styles.badge,
+                {
+                  backgroundColor:
+                    book.source === "turath"
+                      ? colors.accent
+                      : colors.secondary,
+                },
+              ]}>
+              <Text style={[styles.badgeText, { color: colors.primary }]}>
+                {sourceLabel(book.source)}
+              </Text>
+            </View>
+
+            {categoryTitle ? (
+              <View
+                style={[styles.badge, { backgroundColor: colors.secondary }]}>
+                <Feather name="folder" size={10} color={colors.primary} />
+                <Text style={[styles.badgeText, { color: colors.primary }]}>
+                  {categoryTitle}
+                </Text>
+              </View>
+            ) : null}
           </View>
 
-          <Feather name="chevron-left" size={18} color={colors.mutedForeground} />
+          {actionLabel ? (
+            <View style={styles.actionRow}>
+              <Text style={[styles.actionText, { color: colors.mutedForeground }]}>
+                {actionLabel}
+              </Text>
+              <Feather name="chevron-left" size={16} color={colors.mutedForeground} />
+            </View>
+          ) : (
+            <Feather name="chevron-left" size={18} color={colors.mutedForeground} />
+          )}
         </View>
       </View>
     </Pressable>
@@ -150,8 +183,26 @@ const styles = StyleSheet.create({
     marginTop: 9,
     width: "100%",
   },
+  badgeRow: {
+    alignItems: "center",
+    flexDirection: "row-reverse",
+    flexShrink: 1,
+    gap: 5,
+  },
+  actionRow: {
+    alignItems: "center",
+    flexDirection: "row-reverse",
+    gap: 3,
+  },
+  actionText: {
+    fontSize: typography.caption,
+    fontWeight: "700",
+  },
   badge: {
+    alignItems: "center",
     borderRadius: radii.pill,
+    flexDirection: "row-reverse",
+    gap: 3,
     paddingHorizontal: 9,
     paddingVertical: 4,
   },

@@ -49,7 +49,7 @@ import { FavoriteButton } from '@/components/FavoriteButton';
 import { radii, spacing, typography } from '@/constants/tokens';
 import { useColors } from '@/hooks/useColors';
 import { useSettings } from '@/hooks/useAppState';
-import { isQuranDownloaded, offlineSupported, storeLocalSurah } from '@/lib/offline/quranDb';
+import { getQuranAudioLocalUri, isQuranDownloaded, offlineSupported, storeLocalSurah } from '@/lib/offline/quranDb';
 
 /** أرقام عربية للعلامات (عرض فقط — نص الآيات كما هو من الـ API حرفيًا). */
 function toArabicDigits(value: number): string {
@@ -184,6 +184,8 @@ export default function QuranReader() {
     query: { enabled: validId },
   });
   const [surahPlaying, setSurahPlaying] = useState(false);
+  /** رسالة فشل الصوت (انقطاع/رابط فاسد) بدل استثناء مرفوض صامت. */
+  const [audioError, setAudioError] = useState<string | null>(null);
 
   // عمل المشغّل في الوضع الصامت (مرة واحدة عند أول تشغيل).
   useEffect(() => {
@@ -191,6 +193,25 @@ export default function QuranReader() {
     audioModeConfigured.current = true;
     void setAudioModeAsync({ playsInSilentMode: true }).catch(() => undefined);
   }, [playingAyah, surahPlaying]);
+
+  /**
+   * فشل جلب رابط الصوت: نُظهر رسالة بدل ترك الاستثناء مرفوضًا.
+   *Offline نُميّزه ليقول "بدون إنترنت" بدل رسالة عامة.
+   */
+  useEffect(() => {
+    if (!ayahAudioQuery.isError) return;
+    setAudioError(
+      isOfflineError(ayahAudioQuery.error)
+        ? 'لا يوجد اتصال — التلاوة بالآية تحتاج إنترنت. صوت السورة الكامل يعمل بدون إنترنت إن كان منزَّلًا.'
+        : 'تعذّر جلب صوت هذه الآية، حاول مجددًا.',
+    );
+  }, [ayahAudioQuery.isError, ayahAudioQuery.error]);
+
+  /** زر إعادة المحاولة الصامت: نفس المفتاح ⇒ يعيد الجلب من جديد. */
+  const retryAyahAudio = useCallback(() => {
+    setAudioError(null);
+    void ayahAudioQuery.refetch().catch(() => undefined);
+  }, [ayahAudioQuery]);
 
   // البيانات الآمنة: آيات مُفرزة وخالية من التكرار (تحقق fetchQuranSurah).
   const readerData = readerQuery.data;
@@ -229,16 +250,31 @@ export default function QuranReader() {
     finishedAyahRef.current = null;
     armedRef.current = false;
     prevDidJustFinishRef.current = false;
+    setAudioError(null);
     player.replace({ uri: ayahAudioQuery.data.audioUrl });
     player.play();
-  }, [player, playingAyah, id, reciterId, surahPlaying, ayahAudioQuery.isPending, ayahAudioQuery.data]);
+  }, [player, playingAyah, id, reciterId, surahPlaying, ayahAudioQuery.isPending, ayahAudioQuery.data, setAudioError]);
 
-  // صوت السورة كاملة: عند تفعيل وضع "السورة" حمّل ملف السورة وشغّله (استقرار
-  // عبر مفتاح "surah:<id>" المستقل تمامًا عن مفاتيح الآيات).
+  // صوت السورة كاملة: شغّل الملف المحلي إن كان منزَّلًا (تلاوة كاملة بلا إنترنت)،
+  // وإلا فحمّل رابط السورة من الشبكة وشغّله. كان التأثير ينتظر نجاح
+  // surahAudioQuery أولًا، فسورة mp3 منزَّلة كانت لا تزال تتطلب اتصالًا حيًّا —
+  // أي أن مسار "التشغيل بدون إنترنت" كان موجودًا في التخزين لكنه غير مستخدم.
   useEffect(() => {
     if (!surahPlaying) return;
     const key = `surah:${reciterId}:${id}`;
     if (playerStateRef.current?.key === key) return;
+
+    const localUri = offlineSupported() ? getQuranAudioLocalUri(id, reciterId) : null;
+    if (localUri) {
+      playerStateRef.current = { key, url: localUri };
+      finishedAyahRef.current = null;
+      armedRef.current = false;
+      prevDidJustFinishRef.current = false;
+      player.replace({ uri: localUri });
+      player.play();
+      return;
+    }
+
     if (surahAudioQuery.isPending || !surahAudioQuery.data) return;
     playerStateRef.current = { key, url: surahAudioQuery.data.audioUrl };
     finishedAyahRef.current = null;
@@ -258,11 +294,16 @@ export default function QuranReader() {
     if (mode !== 'sequential' || playingAyah === null) return;
     const next = nextAyahPosition({ surah: id, ayah: playingAyah });
     if (next && next.surah === id) {
-      void queryClient.prefetchQuery({
-        queryKey: quranKeys.ayahAudio(id, next.ayah, reciterId),
-        queryFn: () => fetchAyahAudio(id, next.ayah, reciterId),
-        staleTime: 12 * 60 * 60 * 1000,
-      });
+      // prefetchQuery يرفض الوعد عند فشل الشبكة، و`void` وحده يترك رفضًا
+      // بلا مُعالج ⇒ "Uncaught (in promise)". نُسكته صراحةً.
+      void queryClient
+        .prefetchQuery({
+          queryKey: quranKeys.ayahAudio(id, next.ayah, reciterId),
+          queryFn: () => fetchAyahAudio(id, next.ayah, reciterId),
+          staleTime: 12 * 60 * 60 * 1000,
+          retry: 0,
+        })
+        .catch(() => undefined);
     }
   }, [mode, playingAyah, id, reciterId, queryClient]);
 

@@ -553,42 +553,56 @@ export function searchLocalQuranVerses(query: string, limit = 60): LocalQuranVer
     .split(/\s+/)
     .filter(Boolean);
   if (tokens.length === 0) return [];
+  const hits: LocalQuranVerseHit[] = [];
+
+  /**
+   * القراءة على دفعات: نافذة المؤشر في SQLite (CursorWindow) محدودة بحوالي
+   * 2 ميغابايت، وجلب آيات المصحف كاملة (6236 آية + نصها) دفعة واحدة يتجاوز
+   * الحد ويُفشل الاستعلام بـ "Row too big to fit into CursorWindow". لذلك نقرأ
+   * 20 سورة في كل دفعة ونوقف المسح فور بلوغ الحد المطلوب.
+   */
+  const SURAHS_PER_CHUNK = 20;
   try {
-    const rows = db.getAllSync<{
-      surahId: number;
-      number: number;
-      page: number;
-      text: string;
-      nameArabic: string;
-    }>(
-      `SELECT v.surahId, v.number, v.page, v.text, c.nameArabic
-       FROM verses v JOIN chapters c ON c.id = v.surahId
-       ORDER BY v.surahId, v.number`,
-    );
-    const hits: LocalQuranVerseHit[] = [];
-    for (const row of rows) {
-      const normalized = normalizeVerseTextForSearch(row.text);
-      let everyToken = true;
-      for (const token of tokens) {
-        if (normalized.includes(token)) continue;
-        const withoutAl = token.length > 2 && token.startsWith("ال") ? token.slice(2) : null;
-        if (withoutAl && normalized.includes(withoutAl)) continue;
-        everyToken = false;
-        break;
+    for (let firstSurah = 1; firstSurah <= 114 && hits.length < limit; firstSurah += SURAHS_PER_CHUNK) {
+      const lastSurah = Math.min(114, firstSurah + SURAHS_PER_CHUNK - 1);
+      const rows = db.getAllSync<{
+        surahId: number;
+        number: number;
+        page: number;
+        text: string;
+        nameArabic: string;
+      }>(
+        `SELECT v.surahId, v.number, v.page, v.text, c.nameArabic
+         FROM verses v JOIN chapters c ON c.id = v.surahId
+         WHERE v.surahId BETWEEN ? AND ?
+         ORDER BY v.surahId, v.number`,
+        firstSurah,
+        lastSurah,
+      );
+      for (const row of rows) {
+        const normalized = normalizeVerseTextForSearch(row.text);
+        let everyToken = true;
+        for (const token of tokens) {
+          if (normalized.includes(token)) continue;
+          const withoutAl = token.length > 2 && token.startsWith("ال") ? token.slice(2) : null;
+          if (withoutAl && normalized.includes(withoutAl)) continue;
+          everyToken = false;
+          break;
+        }
+        if (!everyToken) continue;
+        hits.push({
+          surahId: row.surahId,
+          surah: row.nameArabic,
+          ayah: row.number,
+          page: row.page,
+          text: row.text,
+        });
+        if (hits.length >= limit) break;
       }
-      if (!everyToken) continue;
-      hits.push({
-        surahId: row.surahId,
-        surah: row.nameArabic,
-        ayah: row.number,
-        page: row.page,
-        text: row.text,
-      });
-      if (hits.length >= limit) break;
     }
     return hits;
   } catch {
-    return [];
+    return hits;
   }
 }
 

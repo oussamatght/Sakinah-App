@@ -1,21 +1,29 @@
 /**
- * مزوّد تراث (api.turath.io, ver=3) — كل المسارات مُتحقّق منها حيًا:
- *   /search?q&page&ver=3 (+ فلترة cat= | author= | book=)
- *   /book?id&include=indexes&ver=3      → meta + indexes (فهرس وأعداد الصفحات)
- *   /page?book_id&pg&ver=3              → نص الصفحة + meta.headings
- *   /author?id&ver=3                    → الاسم + السيرة
+ * مزوّد تراث (api.turath.io, ver=3) — المسارات مُتحقّق منها حيًا:
+ *   /search?q&page&ver=3              → بحث نصي في المحتوى (q إلزامي: بدونه 400)
+ *   /search?...&cat=<id>&ver=3        → فلترة تصنيف على الخادم ✅
+ *   /search?...&author=<id>&ver=3     → فلترة مؤلف (id رقمي) على الخادم ✅
+ *   /book?id&include=indexes&ver=3    → meta + indexes (فهرس وأعداد الصفحات)
+ *   /page?book_id&pg&ver=3            → نص الصفحة + meta.headings
+ *   /author?id&ver=3                  → الاسم + السيرة
  *
- * غير مدعوم عند تراث: تعداد تصنيفات عام (لا نقطة)، ملف تحميل كامل، صور أغلفة.
- * العنوان/المؤلف في نتائج البحث من meta.book_name / meta.author_name فقط.
+ * غير مدعوم عند تراث: تعداد تصنيفات (لا نقطة تصفح)، فلترة بالعنوان وحده،
+ * فلترة باسم المؤلف نصيًا (author= يقبل معرّفًا رقميًا فقط)، ملف تحميل، صور أغلفة.
+ * ملاحظة: /search بحث في **محتوى** الكتب، فقد تُرجع نتائج لا يطابق عنوانها
+ * العبارة — لذلك «اسم الكتاب» و«المؤلف» يضيّقان النتائج محليًا فوق نتائج
+ * الخادم، وهذا مُعلن للمستخدم في تقرير البحث.
  */
 
 import {
+  asNumericId,
   fetchJsonRetry,
+  fieldMatches,
   isJsonRecord,
   itemsOf,
   num,
   safeLimit,
   safePage,
+  SearchNoticeBuilder,
   str,
   stripHtml,
   uniqueById,
@@ -23,8 +31,9 @@ import {
   type CatalogueFilters,
   type IslamicBooksProvider,
 } from "./providers";
-import { TURATH_CAPABILITIES } from "./types";
+import { TURATH_CAPABILITIES, TURATH_SEARCH_CAPABILITIES } from "./types";
 import type {
+  BookSearchFilters,
   IslamicBook,
   IslamicBookAuthor,
   IslamicBookCategory,
@@ -138,13 +147,28 @@ export class TurathBooksProvider implements IslamicBooksProvider {
   readonly id = "turath" as const;
   readonly displayName = "تراث";
   readonly capabilities = TURATH_CAPABILITIES;
+  readonly searchCapabilities = TURATH_SEARCH_CAPABILITIES;
 
   async getCategories(): Promise<IslamicBookCategory[]> {
     return [];
   }
 
+  /** تراث لا يقدّم شجرة تصنيفات (لا نقطة تصفح) — لا نخترع فئات. */
+  async getCategoryBranches(): Promise<IslamicBookCategory[]> {
+    return [];
+  }
+
+  async getCategoryChildren(): Promise<IslamicBookCategory[]> {
+    return [];
+  }
+
   async getBooks(_filters?: CatalogueFilters): Promise<IslamicBookSearchResult> {
     return { items: [], page: 1, perPage: 20, total: 0, hasMore: false };
+  }
+
+  /** تراث لا يقدّم نقطة «كتب المؤلف» (بحثه نصي داخل المحتوى فقط). */
+  async getBooksByAuthor(): Promise<IslamicBookSearchResult | undefined> {
+    return undefined;
   }
 
   async searchBooks(
@@ -171,11 +195,111 @@ export class TurathBooksProvider implements IslamicBooksProvider {
     const total = num(payload.count, items.length) ?? items.length;
 
     return {
-      items,
+      items: uniqueById(items),
       page,
       perPage,
       total,
       hasMore: page * perPage < total,
+    };
+  }
+
+  /**
+   * البحث الموحّد. تراث يُنفّذ على الخادم: النص (q إلزامي) + cat + author.
+   * أما «اسم الكتاب» و«المؤلف» بالنص فيُضيَّقان **محليًا** فوق نتائج الخادم
+   * لأن المصدر لا يوفّر لهما endpoint خاصًا.
+   */
+  async searchWithFilters(
+    filters: BookSearchFilters & { page?: number; perPage?: number },
+  ): Promise<IslamicBookSearchResult> {
+    const page = safePage(filters.page);
+    const perPage = safeLimit(filters.perPage);
+    const mode = filters.mode ?? "free";
+    const notice = new SearchNoticeBuilder(this.searchCapabilities);
+
+    // تراث يرفض أي طلب بلا q → نص البحث هو q في كل الأوضاع النصية.
+    const query = str(filters.query);
+    const authorText = str(filters.author);
+    const categoryId = str(filters.categoryId);
+    const authorId = asNumericId(authorText);
+
+    const textTerm =
+      mode === "author" ? (authorText ?? undefined) : (query ?? undefined);
+
+    if (!textTerm) {
+      // لا كلمة نصية: cat/author وحدهما غير صالحين عند تراث (q إلزامي).
+      if (categoryId) {
+        notice.unsupported(
+          "التصنيف",
+          "تراث لا يقبل الفلترة بالتصنيف دون كلمة بحث (/search يرفض الطلب بدون q).",
+        );
+      }
+      if (authorText) {
+        notice.unsupported(
+          "المؤلف",
+          "تراث لا يقدّم قائمة كتب لمؤلف، والبحث يحتاج كلمة نصية على الأقل.",
+        );
+      }
+      if (!categoryId && !authorText) {
+        notice.limit("البحث المتقدم يحتاج كلمة بحث أو فلترًا واحدًا على الأقل.");
+      }
+      return {
+        items: [],
+        page,
+        perPage,
+        total: 0,
+        hasMore: false,
+        notices: [notice.build(this.id, this.displayName)],
+      };
+    }
+
+    const params = new URLSearchParams({
+      q: textTerm,
+      page: String(page),
+      ver: String(TURATH_VERSION),
+    });
+    if (categoryId) {
+      params.set("cat", categoryId);
+      notice.server("التصنيف (cat)");
+    }
+    if (authorId) {
+      params.set("author", authorId);
+      notice.server("المؤلف (author)");
+    }
+    notice.server("البحث النصي (q)");
+
+    const payload = await fetchJsonRetry<TurathSearchPayload>(
+      `${TURATH_API}/search?${params.toString()}`,
+      "كتب تراث",
+    );
+
+    let items = itemsOf(payload.data ?? payload)
+      .map((raw) => normalizeSearchItem(isJsonRecord(raw) ? raw : {}))
+      .filter((item): item is IslamicBook => item !== null);
+
+    const totalHits = num(payload.count, items.length) ?? items.length;
+
+    // تضييق محلي: العنوان (وضع «اسم الكتاب»).
+    if (mode === "title" && query) {
+      items = items.filter((item) => fieldMatches(item.title, query));
+      notice.client("تضييق العنوان على نتائج المصدر");
+    }
+    // تضييق محلي: اسم المؤلف (وضع «المؤلف» بلا معرّف رقمي).
+    if (mode === "author" && authorText && !authorId) {
+      items = items.filter((item) => fieldMatches(item.author, authorText));
+      notice.client("تضييق اسم المؤلف على نتائج المصدر");
+    }
+
+    items = uniqueById(items);
+    // total يبقى إجمالي نتائج الخادم؛ النتيجة بعد التضييق أقل منه.
+    const hasMore = page * perPage < totalHits && items.length > 0;
+
+    return {
+      items,
+      page,
+      perPage,
+      total: totalHits,
+      hasMore,
+      notices: [notice.build(this.id, this.displayName)],
     };
   }
 
