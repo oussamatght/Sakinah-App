@@ -1,7 +1,5 @@
-/**
- * واجهة موحّدة لمزوّدي مكتبة الكتب: تُجمّع تراث وإسلام هاوس
- * خلف دالة واحدة في كل عملية (بحث / قائمة / تفاصيل / صفحات).
- */
+/** واجهة موحّدة لمزوّدي مكتبة الكتب (تراث وإسلام هاوس وإسلاميك) خلف دالة
+ * واحدة لكل عملية: بحث / قائمة / تفاصيل / صفحات. */
 
 import { IslamHouseBooksProvider } from "./islamHouseProvider";
 import { IslamicAppBooksProvider } from "./islamicAppProvider";
@@ -52,14 +50,9 @@ export const BOOK_SOURCE_LABELS: Record<IslamicLibrarySource, string> = {
 
 const VALID_SOURCES = new Set<string>(ALL_BOOK_SOURCES);
 
-/**
- * يقرأ مصدر الكتاب من معاملات التنقّل (نص يمرّ عبر رابط/URL).
- *
- * كان التحويل السابق `params.source === "islamhouse" ? … : "turath"` يطوي أي
- * مصدر جديد على تراث، فيُطلب slug إسلاميك من مزوّد تراث الذي لا يعرفه
- * ويرجع undefined ⇒ "Query data cannot be undefined" وصفحة فارغة. الآن أي
- * مصدر غير معروف يُرفض صراحةً (null) بدل أن يُرسل لمزوّد خاطئ بصمت.
- */
+/** كان التحويل `source === "islamhouse" ? … : "turath"` يطوي أي مصدر جديد على
+ * تراث، فيُطلب slug إسلاميك من مزوّد تراث ⇒ "Query data cannot be undefined"
+ * وصفحة فارغة؛ الآن المصدر غير المعروف يُرفض صراحةً (null). */
 export function parseBookSource(
   value: string | string[] | undefined,
 ): IslamicLibrarySource | null {
@@ -133,10 +126,8 @@ export async function getLibraryBooks(
   });
 }
 
-/**
- * نتيجة فاشلة كـ«فارغة» بدل رمي الخطأ: مصدر واحد معطّل يجب ألّا يُسقط
- * البحث كله ويُعيد React Query جلب المصادر السليمة من جديد.
- */
+/** نتيجة فاشلة تُعامَل كـ«فارغة» بدل رمي الخطأ: مصدر واحد معطّل لا يُسقط
+ * البحث كله ولا يُعيد React Query جلب المصادر السليمة من جديد. */
 function asEmptyOnError(
   result: Promise<IslamicBookSearchResult>,
   source: IslamicLibrarySource,
@@ -164,14 +155,9 @@ function asEmptyOnError(
   );
 }
 
-/**
- * يدمج تقارير المصادر **بالمصدر الواحد** بدل إلحاقها كما هي.
- *
- * السبب: كل مزوّد يُرجع تقريره الخاص (notice.build)،searchLibraryBooksAdvanced
- * يضيف تقريرًا ثانيًا لنفس المصدر ⇒ مفتاحان متساويان لنفس المصدر، وReact
- * ينبّه: "Encountered two children with the same key, turath". الدمج يضمن
- * **مفتاحًا فريدًا لكل مصدر** مع الحفاظ على كل الخطوات والقيود.
- */
+/** دمج تقارير المصادر **بالمصدر الواحد** لا إلحاقها: كل مزوّد يُرجع تقريره
+ * (notice.build) وsearchLibraryBooksAdvanced يضيف تقريرًا ثانيًا لنفس المصدر
+ * ⇒ مفتاحان متساويان وتحذير React؛ الدمج يضمن **مفتاحًا فريدًا لكل مصدر**. */
 function mergeNotices(
   incoming: BookSearchNotice[],
   into: BookSearchNotice[] = [],
@@ -204,7 +190,6 @@ export async function searchLibraryBooks(
 ): Promise<IslamicBookSearchResult> {
   const page = safePage(params?.page);
   const perPage = safeLimit(params?.perPage);
-  // عزل المصادر: فشل واحد لا يُبطل النتائج السليمة ولا يُعيد جلبها.
   const [a, b, c] = await Promise.all([
     asEmptyOnError(providers.turath.searchBooks(query, params), "turath", page, perPage),
     asEmptyOnError(providers.islamhouse.searchBooks(query, params), "islamhouse", page, perPage),
@@ -217,7 +202,6 @@ export async function searchLibraryBooks(
     perPage: a.perPage,
     total: a.total + b.total + c.total,
     hasMore: a.hasMore || b.hasMore || c.hasMore,
-    // دمج بالمصدر: مفتاح فريد لكل مصدر (مفتاح مكرّر ⇒ تحذير React children).
     notices: mergeNotices([
       ...(a.notices ?? []),
       ...(b.notices ?? []),
@@ -242,16 +226,10 @@ function str2(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
-/**
- * البحث المتقدم الموحّد — يوزّع الفلاتر على المزوّدين القادرين عليها فعلًا،
- * ثم يدمج النتائج ويجمع تقارير «خادم vs محلي» من كل مزوّد ليعرضها المستخدم
- * بصراحة. مصدر واحد محدَّد = لا طلب للآخر إطلاقًا.
- *
- * ملاحظة مهمّة (متحقَّق منها حيًا): **معرّفات التصنيف فضاء خاص بكل مزوّد** —
- * فروع إسلام هاوس (viewcat) ليست معرّفات تراث، وإرسالها لـ cat= يعيد 400.
- * لذلك معرّف التصنيف يُمرَّر لإسلام هاوس (صاحبه في شجرة UI) فقط، ويُذكر
- * للمستخدم صراحةً أن التراث لا يشارك في هذا الفلتر.
- */
+/** البحث المتقدّم الموحّد: يوزّع الفلاتر على المزوّدين القادرين عليها فعلًا
+ * (مصدر واحد محدَّد = لا طلب للآخر)، ومتحقَّق حيًّا: **معرّفات التصنيف فضاء
+ * خاص بكل مزوّد** — فروع إسلام هاوس (viewcat) ليست معرّفات تراث وإرسالها لـ
+ * cat= يعيد 400، فلا يشارك التراث في هذا الفلتر ويُذكر للمستخدم صراحةً. */
 export async function searchLibraryBooksAdvanced(
   filters: BookSearchFilters & { page?: number; perPage?: number },
 ): Promise<IslamicBookSearchResult> {
@@ -263,8 +241,7 @@ export async function searchLibraryBooksAdvanced(
     source === "all" ? ALL_BOOK_SOURCES : [source];
 
   const categoryId = str2(filters.categoryId);
-  // كل مصدر يتسلّم معرّف التصنيف فقط إن كان عائدًا منه (أرقام إسلام هاوس،
-  // slugs إسلاميك)، فنرسله للجميع ويتجاهل ما لا يخصّه.
+  // كل مصدر يتسلّم معرّف التصنيف فقط إن كان عائدًا منه (أرقام إسلام هاوس، slugs إسلاميك) فيتجاهل ما لا يخصّه.
   const results = await Promise.all(
     targets.map((id) =>
       asEmptyOnError(
@@ -285,7 +262,6 @@ export async function searchLibraryBooksAdvanced(
     results.flatMap((result) => result.notices ?? []),
   );
 
-  // إعلان صريح: التصنيف لا يُطبَّق إلا على مصدره (المعرّفات فضاءات منفصلة).
   if (categoryId && source === "all") {
     for (const id of targets) {
       if (id === "islamhouse" || id === "islamicapp") continue;

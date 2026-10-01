@@ -1,12 +1,8 @@
 /**
- * Hadith data — two direct, auth-free providers:
- *
- * 1. hadeethenc.com/api/v1 — thematic Arabic categories (roots/tree).
- *    Normalization ported from artifacts/api-server hadithService.
- * 2. hadis-api-id.vercel.app — the nine canonical books (Bukhari, Muslim,
- *    Ahmad…) with page/limit pagination. Used for browsing whole books.
- *
- * Both normalize into the same HadithItem shape the screens consume.
+ * Hadith data — two direct, auth-free providers: 1) hadeethenc.com/api/v1 —
+ * thematic Arabic categories (roots/tree), normalization ported from
+ * artifacts/api-server hadithService; 2) hadis-api-id.vercel.app — the nine
+ * canonical books with page/limit pagination. Both normalize into HadithItem.
  */
 
 import { fetchJson, intString, isJsonRecord, stringProp, type JsonRecord } from "./http";
@@ -15,10 +11,8 @@ import hadithIndexJson from "../../assets/hadith-index/index.json";
 import type { HadithCategoryNode, HadithItem, HadithPage } from "./types";
 
 /**
- * فهرس الأبواب المولّد مسبقًا (scripts/build-hadith-index.ts →
- * assets/hadith-index/index.json): لكل كتاب أقسامه بأسمائها العربية
- * التقليدية وقائمة أرقام الأحاديث الفعلية لكل قسم (مستخرجة من بيانات
- * المصدر — لا من المدى المعلن المتداخل في بعض الكتب).
+ * فهرس أبواب مولّد مسبقًا (scripts/build-hadith-index.ts → assets/hadith-index/
+ * index.json): أقسام كل كتاب بأسمائها وأرقام أحاديثه من بيانات المصدر لا المدى المعلن المتداخل.
  */
 export type HadithBookSection = {
   section: number;
@@ -32,16 +26,15 @@ const HADITH_INDEX = hadithIndexJson as unknown as {
   books: Record<string, HadithBookSection[]>;
 };
 
-/** فهرس أبواب كتاب واحد (خامس الكتب المدعومة فقط — بقي إجازة). */
+/** فهرس أبواب كتاب واحد (خمسة كتب مدعومة فقط). */
 export function getHadithBookSections(bookSlug: string): HadithBookSection[] {
   return HADITH_INDEX.books[bookSlug] ?? [];
 }
 
 /**
- * أحاديث قسم واحد: تُجلب **الصفحات الفعلية** التي تحتوي أرقام هذا القسم فقط
- * (كل رقم → صفحته ceil(رقم/50)، ثم الصفحات المميزة — عادة بضع صفحات لا
- * المئات)، ثم تُرشّح بترتيب الفهرس. الدرجات لا تُثرّى هنا (N طلبات fawaz
- * محبوسة) — تُحمّل كسولًا في البطاقات عبر useHadithGrade.
+ * أحاديث قسم واحد: تُجلب الصفحات التي تحتوي أرقام القسم فقط ثم تُرشّح بترتيب
+ * الفهرس (جلب كل الصفحات يُغرق في طلبات ضخمة)، والدرجات تُحمّل كسولًا عبر
+ * useHadithGrade.
  */
 export async function fetchHadithSection(
   bookSlug: string,
@@ -51,8 +44,6 @@ export async function fetchHadithSection(
   const section = sections.find((entry) => entry.section === sectionNumber);
   if (!section || section.hadiths.length === 0) return [];
   const numbers = new Set(section.hadiths);
-  // الصفحات التي تحتوي أرقام الباب فقط — لا كل صفحات الكتاب (كانت تُجلب
-  // حتى آخر رقم بأعداد ضخمة من الطلبات المتوازية).
   const pagesNeeded = [
     ...new Set(section.hadiths.map((number) => Math.ceil(number / 50))),
   ];
@@ -73,9 +64,8 @@ export async function fetchHadithSection(
 }
 
 /**
- * حديث واحد برقمه داخل كتاب (hadis-api-id يدعم الجلب المباشر بالرقم —
- * مُتحقق حيًا: /hadith/{book}/{number}). الإثراء مطبق نفسه، وفشل الجلب
- * يرمي خطأً يتكفل فيه المستدعي (البحث بالرقم يعرض "لا يوجد").
+ * حديث واحد برقمه (hadis-api-id يدعم الجلب المباشر بالرقم — مُتحقق حيًا).
+ * الإثراء مطبق نفسه، وفشل الجلب يرمي خطأً يتكفل فيه المستدعي.
  */
 export async function fetchHadithByNumber(
   bookSlug: string,
@@ -89,12 +79,11 @@ export async function fetchHadithByNumber(
     "كتب الحديث",
     { timeoutMs: 20_000 },
   );
-  // الإثراء غير متزامن — ننتظر نتيجة العنصر الواحد كاملة.
   const enriched = await enrichBookGrades([mapHadisApiItem(payload, bookName)], bookSlug);
   return enriched[0];
 }
 
-/** جلب خام (بلا إثراء) للاستخدام الداخلي في fetchHadithSection. */
+/** جلب خام (بلا إثراء) لـ fetchHadithSection. */
 async function fetchBookHadithsRaw(
   bookSlug: string,
   page: number,
@@ -136,9 +125,7 @@ type HadithOneRaw = JsonRecord & {
   reference?: unknown;
 };
 
-// ---------------------------------------------------------------------------
 // Categories: roots + flat list merged into a two-level tree
-// ---------------------------------------------------------------------------
 
 function normalizeCategory(
   raw: HadeethCategoryRaw,
@@ -200,13 +187,8 @@ export async function fetchHadithCategoryChildren(
   return root.children;
 }
 
-// ---------------------------------------------------------------------------
-// Category-title cache (Phase 8): fetchHadithList used to call
-// fetchHadithCategories() on EVERY pagination request just to resolve a
-// title. Fetch once, map ids → titles, dedupe concurrent callers via one
-// in-flight promise. React Query also caches, but this fixes the fetcher
-// itself for every consumer.
-// ---------------------------------------------------------------------------
+// Category-title cache (Phase 8): used to refetch the whole tree on EVERY
+// pagination page for one title — now one fetch + id→title map + one in-flight promise.
 
 let categoriesInFlight: Promise<HadithCategoryNode[]> | null = null;
 const categoryTitleCache = new Map<string, string>();
@@ -244,17 +226,10 @@ async function categoryTitleFor(categoryId: string): Promise<string> {
   return categoryTitleCache.get(categoryId) ?? "موسوعة الأحاديث";
 }
 
-// ---------------------------------------------------------------------------
-// List
-// ---------------------------------------------------------------------------
-
 /**
- * التطبيع (Phase 4):
- *   text = raw.hadeeth (النص الحديث الحقيقي) — وعناصر البحث تستعمل
- *   raw.hadith_text. العنوان (title في HadeethEnc هو بداية متن الحديث نفسه).
- *   ⚠️ raw.explanation لا يُستعمل أبدًا كنص للحديث — هو شرح منفصل (Phase 4).
- *   reference: قائمة HadeethEnc لا تقدم تخريجًا حقيقيًا — فلا نقدم المعرّف
- *   الداخلي كرقم حديث (Phase 5)؛ نتركه فارغًا ويعرض الـUI ما توفر فقط.
+ * التطبيع (Phase 4): text = raw.hadeeth؛ وعناصر البحث تستعمل raw.hadith_text،
+ * وraw.title هو بداية المتن. raw.explanation لا يُستعمل كتك الحديث (شرح منفصل)،
+ * والقائمة لا تعطي تخريجًا (Phase 5) فلا يُقدَّم المعرّف الداخلي كرقم حديث.
  */
 function normalizeListItem(
   raw: JsonRecord,
@@ -263,10 +238,7 @@ function normalizeListItem(
   return normalizeListItemForTest(raw, categoryTitle);
 }
 
-/**
- * التصدير للفحص الآلي فقط (test-grade-normalization.ts) — نفس المنطق الذي
- * تستعمله كل القوائم، بلا أي مسار منفصل.
- */
+/** التصدير للفحص الآلي فقط (test-grade-normalization.ts) — بلا مسار منفصل. */
 export function normalizeListItemForTest(
   raw: JsonRecord,
   categoryTitle?: string,
@@ -280,7 +252,6 @@ export function normalizeListItemForTest(
     id: String(raw.id ?? ""),
     text,
     book: categoryTitle ?? "موسوعة الأحاديث",
-    // لا تخريج في استجابة القائمة — المعرّف الداخلي ليس مرجعًا (Phase 5).
     reference: "",
     ...(stringProp(raw.attribution) ? { attribution: stringProp(raw.attribution)! } : {}),
     ...(stringProp(raw.grade) ? { grade: stringProp(raw.grade)! } : {}),
@@ -300,12 +271,10 @@ export async function fetchHadithList(
     "الأحاديث",
   );
   const data = Array.isArray(payload.data) ? payload.data : [];
-  // "book" for thematic hadiths = the category's own title (Phase 8: cached —
-  // was re-fetching the whole categories tree on every pagination request).
+  // "book" for thematic hadiths = the category's own title (Phase 8: cached).
   const categoryTitle = await categoryTitleFor(categoryId);
-  // الدرجات لا تُجلب هنا (N× fetchHadithDetail تُحبس الصفحة أمام مصدر بطيء)
-  // — تُحمّل كسولًا للبطاقات المرئية فقط عبر useHadithGrade/ItemGrade بنفس
-  // المصدر/الحقل/التطبيع، محفوظةً في كاش React Query بعد أول مرة.
+  // الدرجات لا تُجلب هنا (N× تفصيل يُحبس الصفحة أمام مصدر بطيء) — تُحمّل كسولًا
+  // للبطاقات المرئية عبر useHadithGrade بنفس المصدر والحقل والتطبيع.
   const items = data
     .filter(isJsonRecord)
     .map((raw) => normalizeListItem(raw, categoryTitle))
@@ -332,7 +301,7 @@ export async function fetchHadithList(
   };
 }
 
-/** Full tahrīj string from the source, else the first category title. */
+/** Full tahrīj from the source, else the first category title. */
 function normalizeReference(raw: HadithOneRaw): string | undefined {
   if (typeof raw.reference === "string" && raw.reference.trim()) {
     return raw.reference.trim().split(/\n+/)[0]?.trim() || raw.reference.trim();
@@ -358,9 +327,8 @@ export async function fetchHadithDetail(hadithId: string): Promise<HadithItem> {
     error.code = "HADITH_NOT_FOUND";
     throw error;
   }
-  // Phase 4: text and explanation are DIFFERENT pieces of content — never
-  // fall back from hadeeth to explanation (it would show the explanation as
-  // if it were the hadith). Missing hadeeth is handled explicitly.
+  // Phase 4: text and explanation are DIFFERENT content — never fall back from
+  // hadeeth to explanation (it would show the explanation as the hadith text).
   const text = stringProp(payload.hadeeth) ?? "";
   if (!text.trim()) {
     const error = new Error("نص هذا الحديث غير متاح من المصدر") as Error & {
@@ -384,24 +352,14 @@ export async function fetchHadithDetail(hadithId: string): Promise<HadithItem> {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Search (upstream can be slow — callers pass a longer timeout via React Query)
-// ---------------------------------------------------------------------------
 
 /**
- * البحث (Phase 9 — شكل الاستجابة الحقيقي مُتحقق منه حيًا):
- * HadeethEnc search يرجع مصفوفة عارية من
- *   { id, title, hadith_text, hadith_text_highlights }
- * — لا {data, meta} إطلاقًا. الشكل القديم كان يقرأ payload.data → undefined
- * → نتائج فارغة دائمًا (خطأ فعلي في الإنتاج).
- * كذلك تحققت حيًا أن page/per_page يُهملهما الخادم (صفحة 1 و2 أعادت نفس
- * الـ26 عنصرًا) — فلا pagination حقيقي هنا: hasMore=false هو السلوك الأصح
- * الموثق، ولا نخترع metadata غير موجودة.
- *
- * الدرجات لا تُجلب هنا — كان البحث يثرّي كل النتائج (حتى 50) بنداءات تفصيل
- * بطيئة قبل عرض أي شيء. الآن تُحمّل كسولًا للبطاقات المرئية عبر
- * useHadithGrade/ItemGrade بنفس مصدر شاشة التفصيل — فلا يختلف الحكم أبدًا،
- * والفشل يُبقي بلا درجة (لا اختراع).
+ * البحث (Phase 9 — الشكل مُتحقق حيًا): مصفوفة عارية { id, title, hadith_text,
+ * hadith_text_highlights } لا {data, meta} — الشكل القديم قرأ payload.data
+ * (undefined) فنتائج فارغة دائمًا (خطأ إنتاج). والخادم يُهمل page/per_page
+ * (صفحتان أعادتا نفس العناصر) فلا ترقيم: hasMore=false سلوك موثق بلا metadata
+ * مخترعة. الدرجات كسولًا عبر useHadithGrade بنفس مصدر التفصيل، والفشل بلا درجة.
  */
 export async function searchHadiths(
   phrase: string,
@@ -425,17 +383,12 @@ export async function searchHadiths(
     page: safePage,
     perPage: safePerPage,
     total: items.length,
-    // مصدر الحقيقة: الخادم يتجاهل page/per_page في البحث (مُتحقق حيًا) —
-    // النتائج كاملة في استجابة واحدة، لا صفحات تالية.
+    // الخادم يتجاهل page/per_page في البحث (مُتحقق حيًا): نتيجة واحدة كاملة.
     hasMore: false,
   };
 }
 
-// ---------------------------------------------------------------------------
-// Canonical books (hadis-api-id.vercel.app) — browse Bukhari, Muslim, etc.
-// ---------------------------------------------------------------------------
-
-/** Arabic display names for the nine canonical collections. */
+/** Arabic display names for the nine canonical collections (hadis-api-id). */
 const BOOK_NAMES_AR: Record<string, string> = {
   "abu-dawud": "سنن أبي داود",
   ahmad: "مسند أحمد",
@@ -455,9 +408,8 @@ export type HadithBook = {
   total: number;
 };
 
-/** قائمة الكتب تسعة قديمة بلا تغيير — تُحل مرة واحدة وتُشارك بالجلسة
- *  (مثل كاش التصنيفات). كان كل جلب صفحة/حديث يستدعيها شبكيًا من جديد
- *  (طلب /hadith مكرر)، إلى جانب كاش React Query للمستهلكات. */
+/** قائمة الكتب تسعة ثابتة: تُحل مرة واحدة وتُشارك بالجلسة (مثل كاش التصنيفات) —
+ *  كان كل جلب صفحة/حديث يستدعيها من الشبكة من جديد. */
 let booksInFlight: Promise<HadithBook[]> | null = null;
 let booksCached: HadithBook[] | null = null;
 
@@ -499,12 +451,10 @@ async function fetchHadithBooksFromApi(): Promise<HadithBook[]> {
 }
 
 /**
- * hadis-api-id item (Phase 7) — verified live fields: { number, arab, id }.
- * text = raw.arab exactly as returned (never modified).
- * grade: the API provides NO grading field — it stays undefined here. For the
- * five books fawazahmed0 covers, an enrichment pass (below) attaches the
- * literal grade afterwards; otherwise it stays undefined and the UI shows
- * "درجة الحديث غير متوفرة" — never inferred from the book name.
+ * hadis-api-id item (Phase 7) — verified live fields: { number, arab, id };
+ * text = raw.arab exactly as returned. The API has NO grading field, so grade
+ * stays undefined unless the fawaz enrichment attaches one for the five covered
+ * books — never inferred from the book name.
  */
 function mapHadisApiItem(raw: JsonRecord, bookName: string): HadithItem {
   const number = intString(raw.number, 0) ?? 0;
@@ -518,20 +468,12 @@ function mapHadisApiItem(raw: JsonRecord, bookName: string): HadithItem {
 }
 
 /**
- * الإثراء (fawazahmed0/hadith-api عبر jsDelivr): بعد جلب العناصر من
- * hadis-api-id، نجلب الدرجة **الحرفية** للكتب الخمسة المدعومة فقط برقم
- * الحديث نفسه، مع فحص تطابق نصي مقتضب ضد الترقيم المختلف بين الطبعات
- * (رأس النصين ≥ 0.5 تشابه — بلا أي معالجة للحركات أو النص القرآني).
- * الشكل المحلي والنصان لا يتغيران أبدًا؛ أي فشل/عدم تطابق = يبقى الحديث
- * بلا درجة (GradeBadge showMissing). تفاصيل القواعد في hadithGradeEnrichment.ts.
- */
-/**
- * تُستخدم الآن في المسار الأحادي فقط (fetchHadithByNumber): عنصر واحد،
- * طلب واحد من fawaz عبر jsDelivr. القوائم/الصفحات/الأبواب تبقي عناصرها
- * خام من hadis-api-id (لا N× طلبات تُحبس الجلب) — الدرجات تُحمّل كسولًا
- * للمرئي فقط عبر useHadithGrade/ItemGrade بنفس القاعدة الحرفية
- * (الكتب الخمسة أعلاه، بخاري/مسلم بلا درجة، أي فشل يُبقي بلا درجة).
- * نص/كتاب/رقم العنصر لا يُمس إطلاقًا.
+ * الإثراء (fawazahmed0 عبر jsDelivr): درجة حرفية برقم الحديث للكتب الخمسة
+ * المدعومة فقط، مع فحص تطابق نصي مقتضب ضد اختلاف الترقيم بين الطبعات (تشابه
+ * الرأس ≥ 0.5، بلا معالجة للحركات ولا للنص القرآني)؛ أي فشل أو عدم تطابق = بلا
+ * درجة، ونص/كتاب/رقم العنصر لا يُمس. مستعمل في المسار الأحادي فقط
+ * (fetchHadithByNumber) لأن N× طلبات تُحبس القوائم — الدرجات كسولًا عبر
+ * useHadithGrade. التفاصيل في hadithGradeEnrichment.ts.
  */
 async function enrichBookGrades(items: HadithItem[], bookSlug: string): Promise<HadithItem[]> {
   return Promise.all(
@@ -565,7 +507,6 @@ export async function fetchBookHadiths(
     { timeoutMs: 20_000 },
   );
   const list = Array.isArray(payload.items) ? payload.items : [];
-  // خام — الدرجات تُحمّل كسولًا في البطاقات (useHadithGrade) وليس هنا.
   const items = list
     .filter(isJsonRecord)
     .map((raw) => mapHadisApiItem(raw, bookName));

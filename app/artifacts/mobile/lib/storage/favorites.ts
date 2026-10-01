@@ -1,9 +1,6 @@
 import { readJson, storageKeys, writeJson } from "./client";
 
-/**
- * Local favorites persistence — Phase A groundwork. Same dedupe rule the
- * Phase-2 DB schema uses: unique per (kind, refId) per user/device.
- */
+/** Local favorites persistence — Phase A groundwork; same dedupe rule as the Phase-2 DB schema: unique per (kind, refId). */
 
 export type FavoriteKind = "ayah" | "hadith" | "dhikr";
 

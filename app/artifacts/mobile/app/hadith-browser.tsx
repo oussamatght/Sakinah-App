@@ -25,7 +25,6 @@ import { ItemGrade } from "@/components/GradeBadge";
 import { radii, spacing, typography } from "@/constants/tokens";
 import { useColors } from "@/hooks/useColors";
 
-/** Entry mode: canonical books or thematic categories (hadeethenc). */
 type Mode = "books" | "topics";
 
 /** أحاديث باب واحد — عبر useGetHadithSection (مخزَّن، مع إعادة محاولة). */
@@ -144,10 +143,8 @@ function SectionHadiths({
   );
 }
 
-/**
- * Hadith browser: pick one of the nine canonical books, then page through its
- * ahadith. Opened from the "more" tab with an optional ?book=slug.
- */
+/** Hadith browser: pick one of the nine canonical books, then page through its
+ *  ahadith. Opened from the "more" tab with an optional ?book=slug. */
 export default function HadithBrowser() {
   const colors = useColors();
   const router = useRouter();
@@ -464,7 +461,6 @@ export default function HadithBrowser() {
         ) : null}
       </View>
 
-      {/* شريط بحث نصي — يبحث موضوعيًا عبر hadeethenc في كل الأحاديث */}
       <View style={styles.searchWrap}>
         <View style={[styles.searchBar, { backgroundColor: colors.secondary }]}>
           <Feather name="search" size={17} color={colors.mutedForeground} />
@@ -633,9 +629,8 @@ export default function HadithBrowser() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="فتح تفصيل الحديث"
-              // كل البطاقات تفتح التفصيل: HadeethEnc بمعرّفه، وأحاديث الكتب
-              // (hadis-api-id) بكتابها ورقمها — نفس مسار إنتاج القائمة،
-              // فيُعرض في التفصيل النص والدرجة الحرفية نفسها.
+              // كل البطاقات تفتح التفصيل: HadeethEnc بمعرّفه، وأحاديث الكتب بكتابها ورقمها —
+              // نفس مسار إنتاج القائمة فيُعرض في التفصيل النص والدرجة نفسها.
               onPress={
                 item.apiSource === "hadeethenc.com"
                   ? () =>
@@ -669,9 +664,8 @@ export default function HadithBrowser() {
                 />
               </View>
               <View style={styles.hadithMetaRow}>
-                {/* الدرجة كسولًا (ItemGrade): حرفية من المصدر للكتب الخمسة —
-                    "غير متوفرة" تعني أن المصدر لا يقدم درجة لهذا الحديث ولا
-                    نخترعها. hadeethenc فقط له تفصيل — دعوة الضغط تفتحه. */}
+                {/* الدرجة كسولًا (ItemGrade) وحرفية من المصدر للكتب الخمسة — "غير متوفرة" تعني أن
+                    المصدر لا يقدم درجة ولا نخترعها؛ التفصيل متاح لـhadeethenc فقط. */}
                 <ItemGrade item={item} bookSlug={selectedBook} showMissing />
                 {item.apiSource === "hadeethenc.com" || selectedBook ? (
                   <Text

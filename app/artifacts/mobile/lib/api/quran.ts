@@ -1,13 +1,9 @@
 /**
- * Quran data — direct, auth-free providers (serverless architecture):
- *   - text + chapters + tafsir : api.alquran.cloud/v1
- *   - chapter audio            : api.quran.com/api/v4/chapter_recitations/7
- *
- * (Quran Foundation/QFC was dropped client-side on purpose: it needs an
- * OAuth2 client secret that cannot live safely inside a shipped app bundle.)
- *
- * Normalization logic mirrors what artifacts/api-server/src/services/
- * quranService.ts did, so screen-level shapes are unchanged.
+ * Quran data — auth-free providers: text/chapters/tafsir api.alquran.cloud/v1,
+ * chapter audio api.quran.com/api/v4/chapter_recitations/7. QFC was dropped on
+ * purpose: it needs an OAuth2 secret that cannot live in a shipped bundle.
+ * Normalization mirrors the old api-server quranService.ts, so screen shapes
+ * are unchanged.
  */
 
 import { fetchJson, isJsonRecord, type JsonRecord } from "./http";
@@ -30,11 +26,9 @@ const QURAN_COM_API = "https://api.quran.com/api/v4";
 export type { QuranPageGroup, QuranSurah } from "./types";
 
 /**
- * القارئ الافتراضي في api.quran.com (7 = مشاري راشد العفاسي).
- * أرقام القراء ومراجعهم: recitations في api.quran.com/api/v4/recitations
- * (1 عبد الباسط مجود، 2 الشاطري، 3 أحمد العجمي، 4 الحصري، 5 ماهر المعيقلي،
- * 6 منصور السالمي، 7 مشاري العفاسي، 8 محمد أيوب). القيم متطابقة مع
- * RECITERS في إعدادات التطبيق ليُمرَّر الرقم المختار لكل طلب صوت.
+ * القارئ الافتراضي في api.quran.com (7 = مشاري راشد العفاسي). الأرقام مطابقة
+ * لـ RECITERS في الإعدادات (قائمة القراء في /api/v4/recitations) ليُمرَّر الرقم
+ * المختار مع كل طلب صوت.
  */
 export const DEFAULT_RECITER_ID = 7;
 
@@ -50,7 +44,6 @@ export const RECITER_NAMES: Record<number, string> = {
   8: "محمد أيوب",
 };
 
-/** اسم القارئ للعرض؛ أي رقم غير معروف يعود إلى الافتراضي. */
 export function reciterNameOf(reciterId: number): string {
   return RECITER_NAMES[reciterId] ?? RECITER_NAMES[DEFAULT_RECITER_ID];
 }
@@ -59,12 +52,9 @@ export function reciterNameOf(reciterId: number): string {
 const AYAH_AUDIO_CDN = "https://audio.qurancdn.com";
 
 /**
- * Matches the bismillah in ANY Uthmani-style rendering (tashkeel, dagger
- * alif, alef-wasla differ across providers). Strategy: strip combining marks,
- * match the four words by their base letters, then remove the equivalent
- * leading portion from the ORIGINAL text so the rest keeps its tashkeel.
- *
- * Observed base-letter forms (alquran.cloud quran-uthmani):
+ * يطابق البسملة في أي رسم عثماني (تختلف العلامات وألف الوصل بين المصادر):
+ * نحذف العلامات ونطابق الحروف الأساسية ثم نزيل نفس البادئة من النص الأصلي
+ * ليبقى التشكيل. الأشكال المرصودة (alquran.cloud quran-uthmani):
  *   بسم (628,633,645)  ٱلله (671,644,644,647)
  *   ٱلرحمن (671,644,631,62d,645,646)  ٱلرحيم (671,644,631,62d,64a,645)
  */
@@ -76,7 +66,6 @@ const TASHKEEL =
 function stripLeadingBismillah(text: string): string {
   const stripped = text.replace(TASHKEEL, "");
   if (!BISMILLAH_BASE.test(stripped)) return text;
-  // Cut in the original at the char where the stripped prefix ends.
   const strippedPrefixLen = stripped.split(/\s/).slice(0, 4).join(" ").length;
   let originalIndex = 0;
   let seen = 0;
@@ -86,8 +75,7 @@ function stripLeadingBismillah(text: string): string {
     if (!isMark) seen += 1;
     originalIndex += 1;
   }
-  // Swallow combining marks and whitespace right after the bismillah
-  // (e.g. the kasra that belongs to the final meem of ٱلرَّحِيمِ).
+  // ابتلع العلامات والمسافات التالية للبسملة (مثل كسرة ميم ٱلرَّحِيمِ).
   while (
     originalIndex < text.length &&
     (/\s/.test(text[originalIndex]) ||
@@ -97,10 +85,6 @@ function stripLeadingBismillah(text: string): string {
   }
   return text.slice(originalIndex).trim();
 }
-
-// ---------------------------------------------------------------------------
-// Chapters
-// ---------------------------------------------------------------------------
 
 function mapChapter(raw: JsonRecord): QuranChapter {
   return {
@@ -127,9 +111,8 @@ export async function fetchQuranChapters(): Promise<QuranChapter[]> {
 }
 
 /**
- * Chapter → page ranges from quran.com (immutable data). Powers the
- * "الأجزاء / الصفحات" pickers: a juz is pages (juz-1)*20+1 .. juz*20 (approx.),
- * and a page maps to the surah that contains it.
+ * Chapter → page ranges (quran.com) لاختياري الأجزاء/الصفحات: جزء = صفحات
+ * (juz-1)*20+1..juz*20 تقريبًا، والصفحة تُنسب للسورة التي تحتويها.
  */
 export async function fetchQuranChapterPages(): Promise<QuranChapterPage[]> {
   const payload = await fetchJson<{ chapters?: unknown }>(
@@ -154,16 +137,11 @@ export async function fetchQuranChapterPages(): Promise<QuranChapterPage[]> {
     .sort((a, b) => a.id - b.id);
 }
 
-// ---------------------------------------------------------------------------
-// Surah with verses
-// ---------------------------------------------------------------------------
-
 function mapVerse(raw: JsonRecord, index: number, surahId: number): QuranVerse {
   const verseNumber = Number(raw.numberInSurah) || index + 1;
   let text = String(raw.text ?? "").trim();
-  // alquran.cloud merges bismillah into ayah 1 of every surah except
-  // Al-Fatihah (1) and At-Tawbah (9) — strip it so the reader can render its
-  // own decorative bismillah banner, exactly like the server used to.
+  // alquran.cloud يدمج البسملة في الآية 1 من كل سورة عدا الفاتحة (1) والتوبة (9)
+  // — تُحذف ليعرض القارئ بسملته الزخرفية كما كان الخادم يفعل.
   if (verseNumber === 1 && surahId !== 1 && surahId !== 9) {
     text = stripLeadingBismillah(text);
   }
@@ -221,8 +199,7 @@ export async function fetchQuranSurah(surahId: number): Promise<QuranSurah> {
     error.code = "SURAH_NOT_FOUND";
     throw error;
   }
-  // تحقق من اكتمال السورة: سجّل التحذيرات (إن وُجدت) ثم سلِّم الآيات مرتبة
-  // وخالية من التكرار — بلا سكوت عن النواقص كي لا تختفي آية بلا أثر.
+  // تحقق من الاكتمال: التحذيرات تُسجَّل ثم تُسلَّم الآيات مرتبة بلا تكرار، فلا تختفي آية بلا أثر.
   const validation = validateQuranSurah({ ...chapter, verses });
   if (validation.issues.length > 0) {
     console.warn(`[القرآن] ${validation.issues.join(" | ")}`);
@@ -231,9 +208,8 @@ export async function fetchQuranSurah(surahId: number): Promise<QuranSurah> {
 }
 
 /**
- * Whole-juz fetch — REAL juz boundaries from the same alquran.cloud source
- * (each ayah carries its juz/page), not a page-range approximation. Used by
- * the "الأجزاء" tab: pick a juz → see its actual surah ranges + read its verses.
+ * جزء كامل بحدود حقيقية من alquran.cloud (كل آية تحمل juz/page) لا تقريب نطاق
+ * صفحات — لتابب "الأجزاء": جزء → نطاقات سوره الفعلية وآياته.
  */
 export async function fetchQuranJuz(juz: number): Promise<QuranJuz> {
   if (!Number.isInteger(juz) || juz < 1 || juz > 30) {
@@ -264,9 +240,8 @@ export async function fetchQuranJuz(juz: number): Promise<QuranJuz> {
       id: Number(raw.number),
       verseNumber,
       verseKey: `${surahId}:${verseNumber}`,
-      // Bismillah only ever merges into ayah 1 of a surah, and /juz chunks
-      // start mid-surah (except juz 1), so ayah 1 of Fatihah/Tawbah is the
-      // only case needing preservation — handled here explicitly.
+      // البسملة تندمج في الآية 1 فقط، و/juz يبدأ وسط السورة (عدا الجزء 1)،
+      // فآية الفاتحة/التوبة 1 هي الحالات الوحيدة التي تُحفظ كما وردت.
       text: String(raw.text ?? "").trim(),
       juz: Number(raw.juz ?? juz),
       page: Number(raw.page ?? 0),
@@ -296,10 +271,6 @@ export async function fetchQuranJuz(juz: number): Promise<QuranJuz> {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Chapter audio — whole-surah file for the selected reciter (default 7)
-// ---------------------------------------------------------------------------
-
 export async function fetchQuranAudio(
   surahId: number,
   reciterId: number = DEFAULT_RECITER_ID,
@@ -324,9 +295,8 @@ export async function fetchQuranAudio(
 }
 
 /**
- * تقسيم آيات سورة إلى صفحات مصحف حقيقية (verse.page من alquran.cloud) —
- * دالة نقية مُصدَّرة لتُختبر مباشرة (الكهف/الإخلاص/البقرة/التوبة) وتُستهلك
- * من القارئ؛ أي آية بلا page صالح تُرمى بمكان مؤكد بدل صفحة وهمية 0.
+ * تقسيم آيات السورة لصفحات مصحف حقيقية (verse.page من alquran.cloud) — دالة
+ * نقية مُصدَّرة للاختبارات؛ أي آية بلا page صالح تُرمى بدل صفحة وهمية 0.
  */
 export function groupQuranVersesByPage(verses: QuranVerse[]): QuranPageGroup[] {
   const groups = new Map<number, QuranPageGroup>();
@@ -343,15 +313,10 @@ export function groupQuranVersesByPage(verses: QuranVerse[]): QuranPageGroup[] {
   return [...groups.values()].sort((a, b) => a.page - b.page);
 }
 
-// ---------------------------------------------------------------------------
-// الترتيب القانوني: سورة + آية (التنقّل) — الصفحات للعرض فقط.
-// ---------------------------------------------------------------------------
+// الترتيب القانوني للتنقّل: سورة+آية؛ الصفحات للعرض فقط.
 
-/**
- * عدد آيات السور الـ114 بالترتيب المصحفي الثابت (بيانات معيارية غير قابلة
- * للتغيير — لا تعتمد على أي طلب شبكة). يُستخدم لحساب الآية التالية/السابقة
- * عبر حدود السور دون تخطي أي آية.
- */
+/** عدد آيات السور الـ114 بالترتيب المصحفي الثابت (معياري، بلا طلب شبكة) —
+ *  لحساب الآية التالية/السابقة دون تخطي أي آية. */
 export const SURAH_AYAH_COUNTS: readonly number[] = [
   7, 286, 200, 176, 120, 165, 206, 75, 129, 109, 123, 111, 43, 52, 99, 128, 111,
   110, 98, 135, 112, 78, 118, 64, 77, 227, 93, 88, 69, 60, 34, 30, 73, 54, 45,
@@ -368,10 +333,7 @@ function ayahCountOf(surah: number): number {
   return SURAH_AYAH_COUNTS[surah - 1] ?? 0;
 }
 
-/**
- * الآية التالية في الترتيب القانوني: سورة:آية → سورة:آية+1، وعند آخر آية
- * في السورة → الآية 1 من السورة التالية؛ آخر آية في القرآن (114:6) → null.
- */
+/** الآية التالية قانونيًا: عند آخر آية → الآية 1 من السورة التالية؛ (114:6) → null. */
 export function nextAyahPosition(pos: AyahPosition): AyahPosition | null {
   const { surah, ayah } = pos;
   if (surah < 1 || surah > 114 || ayah < 1 || ayah > ayahCountOf(surah)) return null;
@@ -380,10 +342,7 @@ export function nextAyahPosition(pos: AyahPosition): AyahPosition | null {
   return null;
 }
 
-/**
- * الآية السابقة في الترتيب القانوني: سورة:آية → سورة:آية-1، وعند الآية 1
- * → آخر آية من السورة السابقة؛ أول آية في القرآن (1:1) → null.
- */
+/** الآية السابقة قانونيًا: عند الآية 1 → آخر آية من السورة السابقة؛ (1:1) → null. */
 export function prevAyahPosition(pos: AyahPosition): AyahPosition | null {
   const { surah, ayah } = pos;
   if (surah < 1 || surah > 114 || ayah < 1 || ayah > ayahCountOf(surah)) return null;
@@ -391,10 +350,6 @@ export function prevAyahPosition(pos: AyahPosition): AyahPosition | null {
   if (surah > 1) return { surah: surah - 1, ayah: ayahCountOf(surah - 1) };
   return null;
 }
-
-// ---------------------------------------------------------------------------
-// التحقق من اكتمال السورة (فرز / إزالة تكرار / عدّ + تحذيرات)
-// ---------------------------------------------------------------------------
 
 export type QuranSurahValidation = {
   surahId: number;
@@ -404,9 +359,9 @@ export type QuranSurahValidation = {
   receivedCount: number;
   /** عدد الآيات الصالحة بعد الفرز (فريدة، داخل النطاق). */
   uniqueCount: number;
-  /** هل الآيات الناتجة مطابقة تمامًا للترتيب 1..count بلا قفز ولا تكرار؟ */
+  /** هل الترتيب 1..count مطابق بلا قفز ولا تكرار؟ */
   orderIsCanonical: boolean;
-  /** أرقام آيات تكرّرت أكثر من مرة (تُعرض لمرة واحدة). */
+  /** أرقام آيات تكرّرت (تُعرض مرة واحدة). */
   duplicates: number[];
   /** أرقام من 1..count غير موجودة في البيانات. */
   missing: number[];
@@ -419,11 +374,9 @@ export type QuranSurahValidation = {
 };
 
 /**
- * فحص سورة مقابل العدد القانوني الثابت:
- *  - يكشف التكرار والنواقص والخارج عن النطاق وعدم الترتيب.
- *  - يُعيد `sortedVerses` (فرز + إزالة تكرار، النص الأصلي كما ورد حرفيًا).
- *  - كل انحراف يُعلن في `issues` ليُسجَّل للمطور بدل إسقاط آيات بصمت.
- * دالة نقية قابلة للاختبار (تُستخدم في سكربت التحقق أيضًا).
+ * فحص سورة مقابل العدد القانوني الثابت: يكتشف التكرار والنواقص والخارج عن النطاق
+ * وعدم الترتيب، ويُعيد `sortedVerses` (فرز+إزالة تكرار، النص الأصلي كما ورد)،
+ * مع `issues` لكل انحراف (لا إسقاط صامت لآيات). دالة نقية قابلة للاختبار.
  */
 export function validateQuranSurah(surah: QuranSurah): QuranSurahValidation {
   const canonicalCount = ayahCountOf(surah.id);
@@ -477,7 +430,6 @@ export function validateQuranSurah(surah: QuranSurah): QuranSurahValidation {
     issues.push(`سورة ${surah.id}: الآيات غير مرتبة — أعيد ترتيبها حسب رقم الآية`);
   }
 
-  // فرز + إزالة تكرار: النص الأصلي للأول ظهور يُحفظ كما ورد حرفيًا بلا تحوير.
   const seenOnce = new Set<number>();
   const sortedVerses = surah.verses
     .filter((verse) => {
@@ -508,9 +460,8 @@ export function validateQuranSurah(surah: QuranSurah): QuranSurahValidation {
 }
 
 /**
- * تسطيح سورة في مسار المصحف المتصل: تُدمج صفحات السورة (verse.page الحقيقي)
- * مع صفحات السور السابقة المحفوظة — أرقام الصفحات هي المرجع الوحيد للعرض،
- * والترتيب سورة:آية للتنقّل. الدالة نقية ومُختبرة (البقرة = 48 صفحة...).
+ * تسطيح سورة في مسار المصحف المتصل: دمج صفحات السورة (verse.page الحقيقي) مع
+ * صفحات السور السابقة — أرقام الصفحات مرجع العرض، والترتيب سورة:آية للتنقل.
  */
 export function flattenSurahIntoQuranPages(
   existing: QuranPageGroup[],
@@ -530,9 +481,8 @@ export function flattenSurahIntoQuranPages(
     }
   }
   for (const group of merged.values()) {
-    // الترتيب داخل الصفحة: قانوني (سورة، آية) — الصفحة الواحدة قد تحوي نهاية
-    // سورة وبداية التي تليها (مثل 604: الإخلاص ثم الفلق)، وترتيب verseNumber
-    // وحده كان سيخلطهما (112:1 ثم 113:1 ثم 112:2...).
+    // ترتيب داخل الصفحة: (سورة، آية) لأن الصفحة قد تحوي نهاية سورة وبداية التالية
+    // (604: الإخلاص ثم الفلق)؛ وترتيب verseNumber وحده كان يخلطهما.
     group.verses.sort((a, b) => {
       const [as, aa] = a.verseKey.split(":");
       const [bs, ba] = b.verseKey.split(":");
@@ -543,9 +493,9 @@ export function flattenSurahIntoQuranPages(
 }
 
 /**
- * صوت آية واحدة بالقارئ المحدد — /recitations/{id}/by_ayah/{key}
- * يعيد مسارًا نسبيًا مثل "Alafasy/mp3/002255.mp3" يُبنى فوق
- * audio.qurancdn.com (مُتحقق حيًا 2026-09). المسارات المطلقة تُمرر كما هي.
+ * صوت آية واحدة: /recitations/{id}/by_ayah/{key} يُعيد مسارًا نسبيًا مثل
+ * "Alafasy/mp3/002255.mp3" يُبنى فوق audio.qurancdn.com (مُتحقق حيًا 2026-09)،
+ * والمسارات المطلقة تُمرَّر كما هي.
  */
 export async function fetchAyahAudio(
   surahId: number,
@@ -571,10 +521,6 @@ export async function fetchAyahAudio(
   return { surahId, audioUrl, reciter: reciterNameOf(reciterId), format: "mp3" };
 }
 
-// ---------------------------------------------------------------------------
-// Tafsir (alquran.cloud edition ar.muyassar — التفسير الميسّر)
-// ---------------------------------------------------------------------------
-
 export async function fetchQuranTafsir(
   surahId: number,
   ayahNumber: number,
@@ -588,8 +534,7 @@ export async function fetchQuranTafsir(
   return {
     surahId,
     ayahNumber,
-    // edition.name is the Arabic title ("تفسير المیسر"); englishName is the
-    // publisher ("King Fahad Quran Complex") which reads wrong in the UI.
+    // resourceName = edition.name (العنوان العربي)؛ englishName اسم الناشر فيظهر خطأ في الواجهة.
     resourceName: String(edition.name ?? "التفسير الميسّر"),
     text: String(data.text ?? ""),
   };

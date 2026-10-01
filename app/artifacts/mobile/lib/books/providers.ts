@@ -1,11 +1,8 @@
 /**
- * واجهة المزوّد الموحّدة للمكتبة + أدوات مشتركة (جلب مع إعادة محاولة،
- * فك JSON، تنقية نص).
- *
- * التركيز على «لا نقول أبدًا إن شيئًا مدعوم إن لم نتحقق منه حيًا»:
- * - تراث: بحث/تفاصيل/فهرس/صفحة/مؤلف/بحث داخل الكتاب — مُتحقّق.
- * - إسلام هاوس: تصنيفات/قوائم/تفاصيل/مؤلفون/مرفقات PDF — مُتحقّق.
- * - أي قدرة غير مدعومة عند مزوّد تُرجع [] / undefined (لا endpoint مخترع).
+ * واجهة المزوّد الموحّدة للمكتبة + أدوات مشتركة (جلب مع إعادة محاولة، فك JSON، تنقية
+ * نص)، وبقاعدة «لا نقول أبدًا إن شيء مدعوم إن لم نتحقق منه حيًا»: تراث بحث/تفاصيل/
+ * فهرس/صفحة/مؤلف/داخل الكتاب مُتحقَّق، وإسلام هاوس تصنيفات/قوائم/تفاصيل/مرفقات PDF
+ * مُتحقَّق، وأي قدرة غير مدعومة تُرجع [] أو undefined (لا endpoint مخترع).
  */
 
 import { UpstreamError } from "@/lib/api/types";
@@ -58,10 +55,8 @@ export interface IslamicBooksProvider {
     params?: BookSearchParams,
   ): Promise<IslamicBookSearchResult>;
 
-  /**
-   * البحث الموحّد (نص/عنوان/مؤلف/تصنيف/مصدر). كل مزوّد ينفّذ ما يستطيع على
-   * خادمه ويصفّي الباقي محليًا، ويُرجع تقريرًا صريحًا بما جرى.
-   */
+  /** البحث الموحّد (نص/عنوان/مؤلف/تصنيف/مصدر): كل مزوّد ينفّذ ما يستطيع على
+   * خادمه ويصفّي الباقي محليًا ويُرجع تقريرًا صريحًا بما جرى. */
   searchWithFilters(
     filters: BookSearchFilters & { page?: number; perPage?: number },
   ): Promise<IslamicBookSearchResult>;
@@ -92,9 +87,6 @@ export interface IslamicBooksProvider {
   ): Promise<IslamicBookSearchResult | undefined>;
 }
 
-/* -------------------------------------------------------------------------- */
-/* Helpers                                                                    */
-/* -------------------------------------------------------------------------- */
 
 export function isJsonRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -106,9 +98,7 @@ export function str(value: unknown): string | undefined {
     : undefined;
 }
 
-/**
- * يحوّل معرفًا يأتي رقمًا أو نصًا (على الغالب أرقام في إسلام هاوس) إلى نص.
- */
+/** يحوّل معرّفًا يأتي رقمًا أو نصًّا (أرقام في إسلام هاوس) إلى نص. */
 export function idString(value: unknown): string | undefined {
   if (value === null || value === undefined) return undefined;
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
@@ -138,10 +128,8 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/**
- * جلب JSON مع إعادة محاولة على الشبكة/المهلة/5xx/429 (المصد‌ران بطيئان
- * أحيانًا). أخطاء 4xx العادية تفلتفشل فورًا بلا إعادة.
- */
+/** إعادة محاولة على الشبكة/المهلة/5xx/429 (المصدّران بطيئان أحيانًا)، وأخطاء
+ * 4xx العادية تفشل فورًا بلا إعادة. */
 export async function fetchJsonRetry<T>(
   url: string,
   source: string,
@@ -164,6 +152,8 @@ export async function fetchJsonRetry<T>(
           retryable
             ? `${source} مشغول مؤقتًا، حاول لاحقًا.`
             : `تعذر قراءة البيانات من ${source}.`,
+          false,
+          response.status,
         );
         if (!retryable) throw error;
         last = error;
@@ -243,17 +233,11 @@ export function uniqueById<T extends { id: string }>(items: T[]): T[] {
   return out;
 }
 
-/* -------------------------------------------------------------------------- */
-/* أدوات البحث المتقدم                                                         */
-/* -------------------------------------------------------------------------- */
 
 const TASHKEEL = /[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u0640]/g;
 
-/**
- * تطبيع عربي للمطابقة المحلية فقط: تشكيل، ألفات، تاء مربوطة.
- * يُستخدم لتضييق نتائج خادم المصدر (مثلًا: عنوان يحتوي العبارة) — ولا يُغني
- * أبدًا عن بحث الخادم، ولهذا نُعلنه في التقرير كـ«تصفية محلية».
- */
+/** تطبيع عربي للمطابقة المحلية فقط (تشكيل، ألفات، تاء مربوطة): يضيّق نتائج
+ * خادم المصدر ولا يُغني عنه أبدًا، ولهذا نُعلنه في التقرير كـ«تصفية محلية». */
 export function normalizeArabic(value: string | undefined): string {
   if (!value) return "";
   return value

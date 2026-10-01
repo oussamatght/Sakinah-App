@@ -22,17 +22,13 @@ export function stringProp(value: unknown): string | undefined {
 }
 
 /**
- * In-flight dedupe for identical concurrent GETs. Multiple consumers (list +
- * detail + prefetch) can request the same URL in the same tick; this merges
- * them into one network call. Session-only: entries are removed as soon as the
- * shared promise settles, so nothing is cached beyond an in-flight request.
+ * In-flight dedupe: list + detail + prefetch can request the same URL in the
+ * same tick → one call. Session-only: entries drop as soon as the promise settles.
  */
 const inflightFetches = new Map<string, Promise<unknown>>();
 
-/**
- * JSON fetch with timeout + UpstreamError mapping. All providers below send
- * `access-control-allow-origin: *`, so this works from native fetch and web.
- */
+/** JSON fetch with timeout + UpstreamError mapping; all providers send CORS `*`,
+ *  so it works from native fetch and web. */
 export async function fetchJson<T>(
   url: string,
   source: string,

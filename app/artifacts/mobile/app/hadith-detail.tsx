@@ -17,15 +17,9 @@ import { radii, spacing, typography } from "@/constants/tokens";
 import { useColors } from "@/hooks/useColors";
 
 /**
- * تفصيل الحديث — مسار واحد يخدم مصدري الأحاديث معًا:
- *   - HadeethEnc /hadeeths/one (hadithId) — يقدم grade/attribution/
- *     explanation/reference (مُتحقق حيًا).
- *   - كتاب من hadis-api-id (book + number) — يُفتح بنفس المفتاح الذي تقدمه
- *     القائمة (رقم الحديث) عبر نفس مسار الإنتاج fetchHadithByNumber، فتُعرض
- *     الدرجة الحرفية نفسها (إثراء fawaz) للكتب الخمسة أو «غير متوفرة» إن لم
- *     يقدم المصدر درجة — لا استنتاج.
- * الدرجة تُعرض حرفيًا بلا أي تحوير — GradeBadge لا يستنتج. الشرح يُعرض إن
- * وفره المصدر فقط (كان مصدر الكتب لا يقدمه).
+ * تفصيل الحديث — مسار واحد لمصدري الأحاديث: HadeethEnc /hadeeths/one (hadithId)
+ * بدرجة وراوٍ وشرح ومرجع، وكتاب من hadis-api-id (book + number) بنفس مفتاح القائمة
+ * عبر fetchHadithByNumber. الدرجة تُعرض حرفيًا بلا استنتاج، والشرح إن وفّره المصدر.
  */
 
 export default function HadithDetail() {
@@ -109,7 +103,6 @@ export default function HadithDetail() {
             ) : null}
           </View>
 
-          {/* الشرح من المصدر — قسم مستقل بذاته ولا يُعرض مكان متن الحديث */}
           {item.explanation ? (
             <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={styles.sectionHead}>

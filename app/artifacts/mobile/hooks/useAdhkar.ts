@@ -5,24 +5,22 @@ import type { Dhikr } from "@/lib/api/types";
 import { MIN_SEARCH_LENGTH, normalizeArabic } from "@/lib/arabic";
 import {
   clearAdhkarWirdGoal,
-  completeAdhkarWird,
-  getAdhkarDailyProgress,
+  computeAdhkarWirdProgress,
+  countDhikr,
+  emptyAdhkarProgress,
   getAdhkarWirdSummary,
-  incrementAdhkarCount,
   localDayKey,
   setAdhkarCount,
+  setAdhkarCurrentIndex,
   setAdhkarWirdGoal,
+  type AdhkarCountResult,
   type AdhkarWirdGoal,
   type AdhkarWirdProgress,
 } from "@/lib/storage";
 
 /**
- * طبقة الأذكار: استعلام واحد + اشتقاق محلي بالكامل.
- *
- * القاعدة: لا يُطلب شيء من الشبكة إلّا مرّة واحدة لكل جلسة (كاش React Query
- * المُبَنَّى على Infinity + مُ persister في app/_layout.tsx)، فكل ما يلي
- * — البحث والتصفية والذكر العشوائي والورد — حساب محلي على نفس المصفوفة.
- * الكتابة في البحث لا تُطلق أي طلب.
+ * طبقة الأذكار: استعلام واحد + اشتقاق محلي بالكامل — لا طلب شبكة إلّا مرّة واحدة
+ * لكل جلسة (كاش React Query بـ Infinity + مُ persister في _layout.tsx).
  */
 
 const ETERNITY = Infinity;
@@ -31,13 +29,11 @@ export const adhkarKeys = {
   all: ["adhkar", "all"] as const,
 };
 
-/** المصفوفة كاملة، مرّة واحدة. */
 export function useGetAdhkar(): UseQueryResult<Dhikr[], Error> {
   return useQuery({
     queryKey: adhkarKeys.all,
     queryFn: fetchAdhkar,
-    // نص ثابت تقريبًا، وحجمه صغير (34 ذكرًا) ⇒ يُحفظ في الكاش الدائم
-    // فيقرأ بعد إطفاء التطبيق وبدون اتصال، تمامًا كسور المصحف.
+    // ثابت تقريبًا وصغير ⇒ كاش دائم: يُقرأ بعد إطفاء التطبيق وبدون اتصال.
     staleTime: ETERNITY,
     gcTime: ETERNITY,
   });
@@ -48,10 +44,7 @@ export function findAdhkar(adhkar: Dhikr[] | undefined, order: number): Dhikr | 
   return adhkar?.find((item) => item.order === order);
 }
 
-// ---------------------------------------------------------------------------
-// التصنيفات — ثلاثة فقط، وكلها مشتقّة من حقل `type` الموجود فعلًا.
-// لا نخترع تصنيفًا لا يصدقه المصدر (لا "أذكار النوم" ولا غيره).
-// ---------------------------------------------------------------------------
+// التصنيفات — ثلاثة فقط، مشتقّة من حقل `type` الفعلي: لا نخترع تصنيفًا لا يصدقه المصدر.
 
 export type AdhkarCategoryKey = "all" | "morning" | "evening" | "general";
 
@@ -82,9 +75,7 @@ export function categoryLabel(dhikr: Dhikr): string {
   return found?.label ?? "ذكر";
 }
 
-// ---------------------------------------------------------------------------
-// البحث والتصفية — دوال نقية (قابلة للاختبار بلا React وبلا شبكة)
-// ---------------------------------------------------------------------------
+// البحث والتصفية — دوال نقية (قابلة للاختبار بلا React وبلا شبكة).
 
 export type AdhkarFilterOptions = {
   query?: string;
@@ -92,10 +83,9 @@ export type AdhkarFilterOptions = {
 };
 
 /**
- * يصفّي الأذكار محليًا. البحث يطابق النصّ أو الفضل أو المصدر أو نص الحديث
- * (كلها نصوص حقيقية من المصدر)، بعد التطبيع فيصطاد "الصمد" و"سبحان الله"
- * رغم التشكيل. الترتيب: مطابقة النص أولًا ثم تطابق الفضل/المصدر، وضمن
- * المجموعة يُبقى ترتيب المصدر (order).
+ * يصفّي محليًا: النصّ أو الفضل أو المصدر أو نص الحديث، بعد التطبيع فيصطاد
+ * "الصمد" رغم التشكيل. الأولوية لمطابقة النصّ ثم الفضل/المصدر، وداخل كل
+ * مجموعة يبقى ترتيب المصدر.
  */
 export function filterAdhkar(
   adhkar: Dhikr[],
@@ -127,10 +117,7 @@ export function filterAdhkar(
   return [...primary, ...secondary];
 }
 
-/**
- * "ذكر اليوم": ثابت طوال اليوم (لا يتبدّل كل فتح للشاشة) ويدور يومًا بعد
- * يوم. المحسوب من تاريخ اليوم المحلي وعدد الأذكار الحقيقي.
- */
+/** ذكر اليوم: ثابت طوال اليوم (لا يتبدّل كل فتح للشاشة) ويدور يومًا بعد يوم. */
 export function dailyAdhkar(adhkar: Dhikr[], day: string = localDayKey()): Dhikr | undefined {
   if (adhkar.length === 0) return undefined;
   let seed = 0;
@@ -140,141 +127,160 @@ export function dailyAdhkar(adhkar: Dhikr[], day: string = localDayKey()): Dhikr
   return adhkar[seed % adhkar.length];
 }
 
-// ---------------------------------------------------------------------------
-// تقدّم العدّاد والورد — متجرّ صغير على مستوى الوحدة مع مراقبين،
-// على نمط useSettings في hooks/useAppState.ts، حتى تبقى القائمة وشاشة
-// الذكر متزامنتان بلا إعادة تحميل.
-// ---------------------------------------------------------------------------
+// تقدّم العدّاد والورد — متجرّ صغير على مستوى الوحدة مع مراقبين.
 
+/**
+ * لقطة واحدة على نمط useSettings في hooks/useAppState.ts فتبقى القائمة وشاشة
+ * الذكر متزامنتان. كان هنا متجرّان يقرآن مفتاحين، فعرضت الشاشة ٠ والأخرى ١
+ * في نفس اللحظة؛ الآن كل كتابة تنبّه الجميع دفعة واحدة.
+ */
 type Listener = () => void;
-const progressListeners = new Set<Listener>();
-const wirdListeners = new Set<Listener>();
+const dailyListeners = new Set<Listener>();
 
-function notify(set: Set<Listener>) {
-  for (const listener of set) listener();
-}
-
-let sharedCounts: Record<number, number> = {};
-let sharedWird: {
+type AdhkarSnapshot = {
+  counts: Record<number, number>;
   goal: AdhkarWirdGoal | null;
   progress: AdhkarWirdProgress;
-} = { goal: null, progress: emptyProgress() };
+};
 
-function emptyProgress(): AdhkarWirdProgress {
-  return {
-    dailyGoal: 0,
-    completed: 0,
-    remaining: 0,
-    progress: 0,
-    isComplete: false,
-    hasGoal: false,
-    doneOrders: [],
-  };
+let shared: AdhkarSnapshot = {
+  counts: {},
+  goal: null,
+  progress: emptyAdhkarProgress(),
+};
+
+function notify() {
+  for (const listener of dailyListeners) listener();
 }
 
 /**
- * تقدّم العدّ لكل ذكر اليوم.
- *
- * `increment` هي المستعملة في شاشة الذكر: هي ترفع القيمة المخزَّنة بمقدار
- * واحد/عشرة وتُقصّ عند التكرار المطلوب، فلا تعتمد على حالة React المتأخّرة
- * عند النقر السريع. `setCount` لضبط قيمة مطلقة (إعادة العدّاد مثلًا).
+ * يثبّت اللقطة على الحالة التي أعادتها الكتابة نفسها لا على `shared` السابقة:
+ * قراءة الإنجاز من الذاكرة هي بالضبط التناقض الذي نُصلحه.
+ */
+function adopt(
+  state: { counts: Record<number, number>; doneOrders: number[]; currentIndex: number; day: string },
+  goal: AdhkarWirdGoal | null,
+): void {
+  shared = {
+    counts: state.counts,
+    goal,
+    progress: computeAdhkarWirdProgress(goal, state),
+  };
+  notify();
+}
+
+async function refreshShared(): Promise<void> {
+  const summary = await getAdhkarWirdSummary();
+  shared = {
+    counts: summary.today?.counts ?? {},
+    goal: summary.goal,
+    progress: summary.progress,
+  };
+  notify();
+}
+
+/** مراقب تغيّر اليوم: بلاه بقيت الشاشة تعرض تقدّم الأمس حتى يُفتح التطبيق من جديد. */
+let dayWatcher: ReturnType<typeof setInterval> | null = null;
+let watchedDay = localDayKey();
+let watcherSubscribers = 0;
+
+function acquireDayWatcher() {
+  watcherSubscribers += 1;
+  if (dayWatcher) return;
+  watchedDay = localDayKey();
+  dayWatcher = setInterval(() => {
+    const today = localDayKey();
+    if (today === watchedDay) return;
+    watchedDay = today;
+    void refreshShared();
+  }, 30_000);
+}
+
+function releaseDayWatcher() {
+  watcherSubscribers = Math.max(0, watcherSubscribers - 1);
+  if (watcherSubscribers > 0 || !dayWatcher) return;
+  clearInterval(dayWatcher);
+  dayWatcher = null;
+}
+
+/** الاشتراك في اللقطة المشتركة مع الإبقاء على مراقب اليوم حيًّا. */
+function useAdhkarSnapshot(): AdhkarSnapshot {
+  const [snapshot, setSnapshot] = useState(shared);
+
+  useEffect(() => {
+    const listener = () => setSnapshot(shared);
+    dailyListeners.add(listener);
+    acquireDayWatcher();
+    void refreshShared();
+    return () => {
+      dailyListeners.delete(listener);
+      releaseDayWatcher();
+    };
+  }, []);
+
+  return snapshot;
+}
+
+/**
+ * `increment` ترفع القيمة المخزَّنة (لا حالة React المتأخّرة) وتُتمّ الورد في
+ * الكتابة نفسها، فلا تضيع زيادة عند النقر السريع؛ `setCount` لضبط قيمة مطلقة.
  */
 export function useAdhkarProgress(): {
   counts: Record<number, number>;
-  increment: (order: number, target: number, by?: number) => Promise<void>;
+  increment: (order: number, target: number, by?: number) => Promise<AdhkarCountResult>;
   setCount: (order: number, count: number) => Promise<void>;
   refresh: () => Promise<void>;
 } {
-  const [counts, setCounts] = useState<Record<number, number>>(sharedCounts);
+  const { counts } = useAdhkarSnapshot();
 
-  const refresh = useCallback(async () => {
-    const stored = await getAdhkarDailyProgress();
-    sharedCounts = stored.counts;
-    notify(progressListeners);
-  }, []);
-
-  useEffect(() => {
-    const listener = () => setCounts(sharedCounts);
-    progressListeners.add(listener);
-    void refresh();
-    return () => {
-      progressListeners.delete(listener);
-    };
-  }, [refresh]);
-
-  const increment = useCallback(async (order: number, target: number, by = 1) => {
-    const stored = await incrementAdhkarCount(order, target, by);
-    sharedCounts = stored.counts;
-    notify(progressListeners);
-  }, []);
+  const increment = useCallback(
+    async (order: number, target: number, by = 1) => {
+      const result = await countDhikr(order, target, by);
+      adopt(result.state, shared.goal);
+      return result;
+    },
+    [],
+  );
 
   const setCount = useCallback(async (order: number, count: number) => {
-    const stored = await setAdhkarCount(order, count);
-    sharedCounts = stored.counts;
-    notify(progressListeners);
+    const result = await setAdhkarCount(order, count);
+    adopt(result.state, shared.goal);
   }, []);
 
-  return { counts, increment, setCount, refresh };
+  return { counts, increment, setCount, refresh: refreshShared };
 }
 
 /**
- * ورد الأذكار اليومي: الهدف + ما أُنجز + تغيير الهدف + تسجيل الإتمام.
- *
- * كل تغيير يمرّ بـ `sync` التي تحدّث النسخة المشتركة ثم تنبّه كل الشاشات
- * المشتركة، فلا تبقى القائمة تعرض تقدّمًا قديمًا بعد العودة من شاشة الذكر.
+ * الهدف فقط: الإنجاز يأتي مع كل عدّاد من `useAdhkarProgress().increment` في
+ * كتابة واحدة، فلا ينفصل الورد عن العدّاد.
  */
 export function useAdhkarWird(): {
   goal: AdhkarWirdGoal | null;
   progress: AdhkarWirdProgress;
   setGoal: (target: number) => Promise<void>;
   clearGoal: () => Promise<void>;
-  completeWird: (order: number, defaultTarget: number) => Promise<void>;
+  setCurrentIndex: (index: number) => Promise<void>;
   refresh: () => Promise<void>;
 } {
-  const [goal, setGoalState] = useState<AdhkarWirdGoal | null>(sharedWird.goal);
-  const [progress, setProgress] = useState<AdhkarWirdProgress>(sharedWird.progress);
+  const { goal, progress } = useAdhkarSnapshot();
 
-  const refresh = useCallback(async () => {
-    const summary = await getAdhkarWirdSummary();
-    sharedWird = { goal: summary.goal, progress: summary.progress };
-    notify(wirdListeners);
+  const setGoal = useCallback(async (target: number) => {
+    await setAdhkarWirdGoal(target);
+    // لا نكتفي بتعديل الذاكرة: الهدف يُطبَّق على إنجاز اليوم المحفوظ.
+    await refreshShared();
   }, []);
-
-  useEffect(() => {
-    const listener = () => {
-      setGoalState(sharedWird.goal);
-      setProgress(sharedWird.progress);
-    };
-    wirdListeners.add(listener);
-    void refresh();
-    return () => {
-      wirdListeners.delete(listener);
-    };
-  }, [refresh]);
-
-  const setGoal = useCallback(
-    async (target: number) => {
-      await setAdhkarWirdGoal(target);
-      await refresh();
-    },
-    [refresh],
-  );
 
   const clearGoal = useCallback(async () => {
     await clearAdhkarWirdGoal();
-    await refresh();
-  }, [refresh]);
+    await refreshShared();
+  }, []);
 
-  /** تسجيل إتمام ذكر في سجلّ الورد اليومي ثم مزامنة كل الشاشات. */
-  const completeWird = useCallback(
-    async (order: number, defaultTarget: number) => {
-      await completeAdhkarWird(order, defaultTarget);
-      await refresh();
-    },
-    [refresh],
-  );
+  const setCurrentIndex = useCallback(async (index: number) => {
+    const state = await setAdhkarCurrentIndex(index);
+    adopt(state, shared.goal);
+  }, []);
 
-  return { goal, progress, setGoal, clearGoal, completeWird, refresh };
+  return { goal, progress, setGoal, clearGoal, setCurrentIndex, refresh: refreshShared };
 }
 
 /** أول ذكر في ترتيب المصدر لم يُنجَز اليوم — زر "متابعة الورد" يفتح عليه. */
@@ -287,7 +293,6 @@ export function nextWirdDhikr(
   return adhkar.find((item) => !done.has(item.order));
 }
 
-/** خيارات عددية للهدف اليومي — أرقام بسيطة، والهدف يختاره المستخدم. */
 export const WIRD_TARGET_OPTIONS = [3, 5, 10, 15] as const;
 
 /** يستعمل useMemo لتفادي إعادة الحساب في كل رسم. */

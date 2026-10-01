@@ -1,10 +1,7 @@
 import { readJson, storageKeys, writeJson } from "./client";
 
-/**
- * Reading-position persistence — saved automatically (no user action) every
- * time the quran-reader mounts a surah or the user scrolls/taps to a verse.
- * The home "أكمل وردك" card reads this to offer a resume shortcut.
- */
+// Reading-position persistence — saved automatically (no user action) on every
+// surah mount or verse tap; the home continue-reading card reads it for resume.
 
 export type ReadingPosition = {
   surahId: number;

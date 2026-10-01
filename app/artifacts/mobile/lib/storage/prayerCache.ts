@@ -1,9 +1,8 @@
 import { readJson, storageKeys, writeJson } from "./client";
 
 /**
- * Last-known prayer times (Task 8). Stored after EVERY successful Aladhan
- * fetch. When offline, screens show this instead of an error, with a clear
- * "آخر مواقيت محفوظة" notice — never an empty/error screen.
+ * Last-known prayer times — stored after every successful Aladhan fetch, so
+ * offline screens show them with a notice instead of an empty/error screen.
  */
 
 export type CachedPrayerTimes = {

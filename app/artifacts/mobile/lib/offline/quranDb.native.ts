@@ -11,30 +11,26 @@ import type {
 } from "@/lib/api/types";
 
 /**
- * Offline Quran store (Task 5 — native) — SQLite via expo-sqlite.
+ * Offline Quran store (Task 5 — native) — SQLite via expo-sqlite. Metro picks
+ * the web stub (quranDb.ts) over this file, so offline is native-only.
  *
- * Import point (verified against node_modules/expo-sqlite/build):
- *   index.d.ts re-exports ./SQLiteDatabase, which declares both
- *   openDatabaseSync (l.358) and openDatabaseAsync (l.348). So
- *   `import { openDatabaseSync } from 'expo-sqlite'` is the correct import.
- *
- * Sync vs Async policy:
- *   - *Sync: fast point reads (one surah / one ayah / one tafsir row) — safe
- *     because they touch a handful of indexed rows.
- *   - *Async: the initial 114-surah download (thousands of inserts + network
- *     batches) so the JS thread stays responsive and progress updates render.
+ * Import: openDatabaseSync is the correct one — expo-sqlite's index.d.ts
+ * re-exports ./SQLiteDatabase which declares both openDatabaseSync (l.358) and
+ * openDatabaseAsync (l.348) (verified against node_modules/expo-sqlite/build).
+ * *Sync only for fast point reads (a few indexed rows); *Async for the initial
+ * 114-surah download (thousands of inserts + network batches) so the JS thread
+ * stays responsive and progress updates render.
  *
  * Resume semantics: each surah is committed in its own async transaction and
- * recorded in meta('quran.surah.'+id). An interrupted download skips surahs
- * already stored and continues where it stopped.
+ * recorded in meta('quran.surah.'+id), so an interrupted download skips stored
+ * surahs and continues where it stopped.
  *
- * Schema (surahId+number PK, index on juz; chapters carry the page ranges):
- *   chapters(id, nameArabic, nameEnglish, revelationPlace, versesCount)
- *   verses(surahId, number, text, juz, page)
- *   tafsir(surahId, ayahNumber, resourceName, text) — on-demand cache + full download
- *   surah_audio(surahId, reciterId, url, reciter, format) — whole-surah mp3 of
- *     the selected reciter; the actual file lives in document/surah-audio/
- *     (expo-file-system) and the reader prefers it when present (true offline).
+ * Schema: chapters(id, nameArabic, nameEnglish, revelationPlace, versesCount);
+ *   verses(surahId+number PK, juz indexed, page) — chapters carry page ranges;
+ *   tafsir(surahId, ayahNumber, resourceName, text) — on-demand cache + full download;
+ *   surah_audio(surahId, reciterId, url, reciter, format) — whole-surah mp3 of the
+ *     selected reciter; the file lives in document/surah-audio/ (expo-file-system)
+ *     and the reader prefers it when present (true offline).
  */
 
 const DB_NAME = "sakinah-quran.db";
@@ -90,10 +86,6 @@ function getDb(): SQLiteDatabase | null {
     return null;
   }
 }
-
-// ---------------------------------------------------------------------------
-// Download state
-// ---------------------------------------------------------------------------
 
 export type DownloadState = {
   downloadedAt: string | null;
@@ -153,9 +145,7 @@ export function isQuranDownloaded(): boolean {
   return state.downloadedAt !== null && state.ayahCount >= 6230;
 }
 
-// ---------------------------------------------------------------------------
-// Download — surahs fetched from the SAME providers the app already uses
-// ---------------------------------------------------------------------------
+// Surahs are fetched from the SAME providers the app already uses.
 
 /** Bismillah stripping — duplicated from lib/api/quran.ts (see that file). */
 const BISMILLAH_BASE = /^بسم\s+ٱلله\s+ٱلرحمن\s+ٱلرحيم(?=\s|$)/;
@@ -183,20 +173,18 @@ function stripLeadingBismillah(text: string): string {
 }
 
 export type DownloadProgress = {
-  /** مرحلة التنزيل الحالية تُعرض في الشاشة (النص: chapters → surahs → tafsir → audio). */
+  /** المرحلة الحالية تُعرض في الشاشة (chapters → surahs → tafsir → audio). */
   phase: "chapters" | "surahs" | "tafsir" | "audio";
-  /** Finished items within the current phase. */
+  /** المنجز/الإجمالي داخل المرحلة؛ percent = النسبة شاملة منتصف المرحلة. */
   done: number;
   total: number;
-  /** Overall percentage including the current phase midpoint. */
   percent: number;
 };
 
 /**
- * وسائط اختيارية للتنزيل الكامل (مراحل إضافية بعد النص):
- *  - includeTafsir: حمل تفسير كل آية (الميسّر) ورقنه في جدول tafsir المحلي.
- *  - includeAudio: حمل صوت السور كاملة (ملف واحد لكل سورة) للقارئ المحدد
- *    ورقنته في document/surah-audio/ ثم جدول surah_audio (تشغيل بدون إنترنت).
+ * وسائط اختيارية بعد النص: includeTafsir يحمل تفسير كل آية في جدول tafsir،
+ * وincludeAudio يحمل صوت السور (ملف لكل سورة) في document/surah-audio/ ثم
+ * جدول surah_audio (تشغيل بدون إنترنت).
  */
 export type DownloadMediaOptions = {
   includeTafsir?: boolean;
@@ -207,12 +195,10 @@ export type DownloadMediaOptions = {
 };
 
 /**
- * Downloads the whole Quran (chapters + 114 Uthmani surahs) using the ASYNC
- * API end-to-end. Surahs are fetched in small parallel batches; each batch is
- * committed with withTransactionAsync, and each stored surah is marked in
- * meta so an interrupted download resumes instead of restarting. Optional
- * media phases (tafsir / whole-surah audio) run afterwards and skip rows that
- * already exist locally.
+ * Downloads the whole Quran (chapters + 114 Uthmani surahs) end-to-end via the
+ * ASYNC API: small parallel batches, each committed with withTransactionAsync
+ * and marked in meta so an interrupted download resumes; optional media phases
+ * follow, skipping rows already stored locally.
  */
 export async function downloadQuran(
   fetchSurah: (surahId: number) => Promise<QuranSurah>,
@@ -260,7 +246,7 @@ export async function downloadQuran(
 
   for (let start = 0; start < pending.length; start += BATCH) {
     const batchIds = pending.slice(start, start + BATCH);
-    // Network first (parallel), then one async transaction per batch.
+    // Network first (parallel), then one transaction per batch.
     const surahs = await Promise.all(batchIds.map((id) => fetchSurah(id)));
     await db.withTransactionAsync(async () => {
       for (const surah of surahs) {
@@ -358,11 +344,9 @@ export async function downloadQuran(
 }
 
 /**
- * تنزيل سورة واحدة للاستخدام بدون إنترنت: نص السورة دائمًا، وباختيار
- * المستخدم تفسير آياتها (includeTafsir) وصوتها mp3 (includeAudio) للقارئ
- * المحدد. نفس مسارات التخزين التي يستعملها التنزيل الكامل، وكل قطعة
- * موجودة محليًا تُتخطى (تنزيل قابل للاستئناف). لا يلمس quran.downloadedAt —
- * فالمصحف لا يُعتبر «كاملًا» إلا بكل آياته.
+ * تنزيل سورة واحدة للاستخدام بدون إنترنت: نصها دائمًا، وباختيار المستخدم تفسير
+ * آياتها وصوتها mp3 للقارئ المحدد — بنفس مسارات التخزين، وكل قطعة موجودة محليًا
+ * تُتخطى (قابل للاستئناف). لا يلمس quran.downloadedAt فلا تُعتبر المصحف كاملة.
  */
 export async function downloadQuranSurah(
   surahId: number,
@@ -422,13 +406,11 @@ export async function downloadQuranSurah(
   return { ayahCount: surah.verses.length };
 }
 
-// ---------------------------------------------------------------------------
-// Local reads — SYNC (fast point reads), same shapes the API fetchers return
-// ---------------------------------------------------------------------------
+// Local reads are SYNC (fast point reads), same shapes the API fetchers return.
 
 /**
- * يحفظ سورة واحدة (نصها + سطر chapters + علامة اكتمال) للتلاوة بدون إنترنت.
- * يُستخدم من "حفظ السورة" في القارئ؛ آمن للاتصال عدة مرات (INSERT OR REPLACE).
+ * يحفظ سورة واحدة (نصها + سطر chapters + علامة اكتمال) للتلاوة بدون إنترنت؛
+ * آمن للاتصال عدة مرات (INSERT OR REPLACE).
  */
 export function storeLocalSurah(surah: QuranSurah): void {
   const db = getDb();
@@ -527,8 +509,8 @@ export type LocalQuranVerseHit = {
   text: string;
 };
 
-/** Mirrors lib/api/queries.ts normalizeForSearch — plain Arabic so a user typing
- *  "الكرسي" matches "ٱللَّهُ ... وَسِعَ كُرْسِيُّهُ". */
+/** Mirrors lib/api/queries.ts normalizeForSearch — plain Arabic, so "الكرسي"
+ *  matches "ٱللَّهُ ... وَسِعَ كُرْسِيُّهُ". */
 const SEARCH_TASHKEEL = /[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u0640]/g;
 
 function normalizeVerseTextForSearch(text: string): string {
@@ -540,11 +522,9 @@ function normalizeVerseTextForSearch(text: string): string {
 }
 
 /**
- * بحث نصي مباشر في الآيات المحمَّلة على الجهاز — يطابق نص الآية مع تجاهل
- * التشكيل والهمزات (بحث "آية بالتسمية"، مثل "الكرسي" أو "الحمد لله").
- * المطابقة بالكلمات: كل كلمة من البحث يجب أن تظهر في الآية (مع قراءة
- * كلمات تبدأ بـ"ال" بدون ال كذلك يكفي "كرسيه" لطوف "الكرسي").
- * بالترتيب المصحفي، ويعيد [] على الويب (لا مخزن محلي).
+ * بحث نصي مباشر في الآيات المحمَّلة على الجهاز يتجاهل التشكيل والهمزات، وكل
+ * كلمة بحث يجب أن تظهر في الآية (وكلمة تبدأ بـ"ال" تُقبل بدون ال — يكفي
+ * "كرسيه" لـ"الكرسي"). بالترتيب المصحفي، ويعيد [] على الويب (لا مخزن محلي).
  */
 export function searchLocalQuranVerses(query: string, limit = 60): LocalQuranVerseHit[] {
   const db = getDb();
@@ -556,10 +536,9 @@ export function searchLocalQuranVerses(query: string, limit = 60): LocalQuranVer
   const hits: LocalQuranVerseHit[] = [];
 
   /**
-   * القراءة على دفعات: نافذة المؤشر في SQLite (CursorWindow) محدودة بحوالي
-   * 2 ميغابايت، وجلب آيات المصحف كاملة (6236 آية + نصها) دفعة واحدة يتجاوز
-   * الحد ويُفشل الاستعلام بـ "Row too big to fit into CursorWindow". لذلك نقرأ
-   * 20 سورة في كل دفعة ونوقف المسح فور بلوغ الحد المطلوب.
+   * القراءة على دفعات: نافذة SQLite (CursorWindow) ~2 ميغابايت، وجلب كل آيات
+   * المصحف دفعة واحدة يُفشل بـ"Row too big to fit into CursorWindow" — لذا
+   * 20 سورة لكل دفعة مع توقف فوري عند بلوغ الحد.
    */
   const SURAHS_PER_CHUNK = 20;
   try {
@@ -665,9 +644,7 @@ export function getLocalJuz(juz: number): QuranJuz | null {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Tafsir on-demand cache (fetch → store → read offline afterwards)
-// ---------------------------------------------------------------------------
 
 export function getLocalTafsir(
   surahId: number,
@@ -705,20 +682,14 @@ export function storeLocalTafsir(tafsir: QuranTafsir): void {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Whole-surah audio for the selected reciter — stored DB row + real mp3 file
-// ---------------------------------------------------------------------------
-
+// Whole-surah audio for the selected reciter — DB row + real mp3 file
 const AUDIO_DIR = "surah-audio";
 
 function audioFileFor(surahId: number, reciterId: number): File {
   return new File(new Directory(Paths.document, AUDIO_DIR), `${reciterId}-${surahId}.mp3`);
 }
 
-/**
- * ينزّل ملف mp3 لسورة/قارئ إلى ذاكرة التطبيق (document/surah-audio) ويعيد
- * موقعه المحلي. ملف موجود مسبقًا لا يُعاد تنزيله (يُستخدم مباشرة).
- */
+/** ينزّل mp3 لسورة/قارئ إلى document/surah-audio ويعيد موقعه؛ ملف موجود لا يُعاد تنزيله. */
 export async function downloadQuranAudioFile(
   surahId: number,
   reciterId: number,

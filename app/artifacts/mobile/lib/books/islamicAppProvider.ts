@@ -1,34 +1,17 @@
 /**
- * مزوّد islamic.app (api.islamic.app/v1/library) — مكتبة كلاسيكية مفتوحة،
- * **بدون مفتاح API وبلا تسجيل** و CORS مفتوح (متحقّق: ACAO=*).
- *
- * كل المسارات هنا مُتحقَّق منها حيًّا (2026-09) قبل البناء:
- *   /v1/library/genres                        → 11 تصنيفًا + count لكل تصنيف ✅
- *   /v1/library/books?limit&offset            → 563 كتابًا، ترقيم بد.offset ✅
- *   /v1/library/books?genre=<slug>            → فلترة تصنيف على الخادم ✅
- *   /v1/library/books?author=<id>             → فلترة مؤلف بالمعرّف ✅ (36 لابن تيمية)
- *   /v1/library/books?school=hanbali          → فلترة مدرسة ✅
- *   /v1/library/search?q=&limit=              → بحث دلالي، يرجّع كتبًا + score ✅
- *   /v1/library/authors?limit&offset          → 332 مؤلفًا + works_count ✅
- *   /v1/library/authors/{id}                  → تفاصيل المؤلف + كتبه ✅
- *   /v1/library/books/{slug}                  → تفاصيل كاملة + sources + author ✅
- *   /v1/library/books/{slug}/chapters         → فهرس مسطّح (عناوين + start_page) ✅
- *   /v1/library/books/{slug}/text             → نص الكتاب منظّم (فصول) ✅
- *   /v1/library/books/{slug}/file?format=pdf  → PDF من R2 بدعم Range ✅
- *
- * حدود مُتحقَّق منها (لا نُخترع قدرة):
- *  - ‎`q` على ‎/books **غير مُفعَّل**: ‎?q=tafsir يُرجع total=563 (كل الكتب)،
- *    فالبحث النصي يمرّ إلزاميًا عبر ‎/library/search.
- *  - لا بحث بالعنوان وحده ولا باسم المؤلف نصًّا على ‎/books.
- *  - ‎/text يُرجع **الكتاب كاملًا** في طلب واحد (لا ‎/page صفحة-بصفحة)،
- *    فيُجلب مرّة ويُخزَّن، ثم نُشتقّ منه الفهرس والصفحات محليًّا.
- *    قياس حي على كتاب تفسير 203 صفحات: ‎190KB في ‎1.8s، 153 فصلًا، 98 منها
- *    بنصّ ⇒ مقبول للتخزين المؤقت، ولا يُعاد إلا مرة واحدة.
- *  - بعض الكتب PDF فقط (has_text=false) ⇒ لا صفحة-بصفعة، PDF فقط.
- *  - كل الردود envelop: ‎{code, status, data:{…}} — نغلّفها بـ dataOf.
- *
- * معرّفات التصنيف هنا **slugs** (aqeedah/tafsir/fiqh…) وهي فضاء مختلف عن
- * أرقام إسلام هاوس وتراث، فلا تُرسل لمصدر آخر (انظر lib/books/index.ts).
+ * مزوّد islamic.app (api.islamic.app/v1/library) — مكتبة مفتوحة بلا مفتاح API
+ * وبلا تسجيل وCORS مفتوح (متحقّق: ACAO=*)، والمسارات مُتحقَّق منها حيًّا (2026-09):
+ *   /genres → 11 تصنيفًا + count ✅ · /books?limit&offset → 563 كتابًا بترقيم
+ *   offset وفلترة genre/author/school ✅ · /search?q= → دلالي + score ✅ · /authors
+ *   → 332 + works_count، و/authors/{id} ✅ · /books/{slug} تفاصيل + sources ✅
+ *   · /books/{slug}/chapters فهرس مسطّح (عناوين + start_page) ✅ · /books/{slug}/text
+ *   نص منظّم (فصول) ✅ · /file?format=pdf PDF من R2 بدعم Range ✅
+ * حدود مُتحقَّق منها (لا نُخترع قدرة): ‎q على ‎/books **معطّل** ⇒ البحث النصي
+ *   إلزامي عبر ‎/library/search ولا فلترة بالعنوان ولا بالمؤلف نصًّا؛ ‎/text يُرجع
+ *   الكتاب كاملًا في طلب واحد (لا ‎/page) فيُجلب مرّة ويُخزَّن (تفسير 203 صفحات:
+ *   190KB في 1.8s) وتُشتقّ منه الفهرس والصفحات؛ بعض الكتب PDF فقط (has_text=false)؛
+ *   والردود {code,status,data:{…}} تُقرأ بـ dataOf. ومعرّفات التصنيف هنا **slugs**
+ *   فضاء مختلف عن أرقام إسلام هاوس وتراث فلا تُرسل لمصدر آخر (lib/books/index.ts).
  */
 
 import {
@@ -63,13 +46,8 @@ const LIB_API = "https://api.islamic.app/v1/library";
 const SOURCE_NAME = "إسلاميك";
 const SOURCE = "islamicapp" as const;
 
-/**
- * ذاكرة في-العملية لنص الكتاب: ‎/text يُرجع الكتاب كاملًا في طلب واحد
- * (لا ‎/page عند islamic.app)، والقارئ يطلب صفحة-بصفحة. بدون هذه الذاكرة
- * سيجلب القارئ 190KB كاملة لكل صفحة (.Network overhead هائل). الذاكرة
- * تُصفَّر تلقائيًا عند خروج التطبيق، ويُحفظ النص أيضًا في كاش React Query
- * (useLibraryBookText عبر staleTime طويل).
- */
+/** ذاكرة في-العملية لنص الكتاب (‎/text يُرجعه كاملًا والقارئ صفحة-بصفحة ⇒ 190KB
+ * لكل صفحة بدونها)؛ تُصفَّر عند الخروج ويُحفظ النص أيضًا في كاش React Query. */
 type BookTextSection = {
   title: string;
   level: number;
@@ -81,7 +59,6 @@ type BookTextSection = {
 type BookTextBundle = {
   sections: BookTextSection[];
   pageCount: number;
-  /** الصفحة الأولى التي فيها نص فعلي (لتفادي صفحة بيضاء في البداية). */
   firstTextPage: number;
 };
 
@@ -99,12 +76,8 @@ function sectionTitle(row: Record<string, unknown>, text: string): string {
   return firstLine.length > 70 ? `${firstLine.slice(0, 70)}…` : firstLine;
 }
 
-/**
- * يبني «خريطة صفحات» من فصول الكتاب: كل فصل يغطي [page, nextPage-1].
- * أرقام الصفحات في islamic.app **متفرّقة** (فهرس 153 فصلًا في كتاب 203 صفحات)،
- * فالصفحة المطلوبة قد تقع داخل فصل لا أن تبدأه — نبحث عن الفصل الحاوي لا
- * عن الفصل الذي page يساويه بالضبط، وإلا لظهرت صفحات فارغة.
- */
+/** خريطة صفحات: كل فصل يغطي [page, nextPage-1] وأرقام الصفحات في islamic.app
+ * **متفرّقة** (153 فصلًا في 203 صفحات) ⇒ نبحث عن الفصل الحاوي لا عن مطابقة page. */
 function sectionForPage(
   sections: BookTextSection[],
   page: number,
@@ -139,9 +112,7 @@ async function fetchBookText(slug: string): Promise<BookTextBundle> {
       const text = str(row.text);
       if (!text) return;
       sections.push({
-        // بعض الكتب تُرجع title فارغًا لكل الفصول (متحقَّق:
-        // akhlaq-ahl-quran ⇒ 17 فصلًا كلها بلا عنوان). وقتها أول سطر من
-        // النص هو العنوان الحقيقي، falo "القسم 7" لا يقول شيئًا للمستخدم.
+        // بعض الكتب تُرجع title فارغًا لكل الفصول (akhlaq-ahl-quran: 17 فصلًا) ⇒ أول سطر من النص هو العنوان الحقيقي.
         title: sectionTitle(row, text) || `القسم ${index + 1}`,
         level: num(row.level) ?? 0,
         page: num(row.page) ?? sections.length + 1,
@@ -244,8 +215,9 @@ function normalizeBook(raw: RawBook): IslamicBook | null {
       ? `${LIB_API}/books/${encodeURIComponent(slug)}/file?format=pdf`
       : undefined,
     pages,
-    // has_text لكل كتاب:_pdf فقط ⇒ لا زر «ابدأ القراءة» (بلا نص للعرض).
     hasText: raw.has_text === true,
+    // has_text=true لا يعني قابلية القراءة: ‎/text يُرجع 413 payload_oversize لكتب كثيرة (٥٥ من ٥٦٣) فلا تُؤكَّد القراءة من البيانات الوصفية.
+    readability: raw.has_text === true ? "unverified" : "pdf-only",
     infoLong: str(raw.subgenre) ?? str(raw.school),
   };
 }
@@ -266,7 +238,6 @@ export class IslamicAppBooksProvider implements IslamicBooksProvider {
 
   private genresPromise?: Promise<IslamicBookCategory[]>;
 
-  /** التصنيفات = الأنواع (genres) من الخادم مع عدد الكتب الحقيقي. */
   private async loadGenres(): Promise<IslamicBookCategory[]> {
     if (!this.genresPromise) {
       this.genresPromise = (async () => {
@@ -303,12 +274,11 @@ export class IslamicAppBooksProvider implements IslamicBooksProvider {
     return this.loadGenres();
   }
 
-  /** الأنواع هي نفسها الفروع: مستوى واحد بلا أبناء. */
+  /** الأنواع هي نفسها الفروع: مستوى واحد بلا أبناء (لا تدرّج ولا 11 نوعًا). */
   async getCategoryBranches(): Promise<IslamicBookCategory[]> {
     return this.loadGenres();
   }
 
-  /** بلا تدرّج: الأنواع 11 ولا يوجد أبناء. */
   async getCategoryChildren(): Promise<IslamicBookCategory[]> {
     return [];
   }
@@ -354,10 +324,8 @@ export class IslamicAppBooksProvider implements IslamicBooksProvider {
     return this.listBooks({ genre, page, perPage });
   }
 
-  /**
-   * البحث النصي يمرّ إلزاميًا عبر /library/search (q على /books معطّل)،
-   * ثم نُطبّق المؤلف/المصدر محليًا على النتائج لأن /search لا يقبلهما.
-   */
+  /** البحث النصي إلزامي عبر /library/search (q على /books معطّل)؛ المؤلف والمصدر
+   * يُصفَّيان محليًا لأن /search لا يقبلهما. */
   async searchBooks(
     query: string,
     params?: BookSearchParams,
@@ -399,7 +367,7 @@ export class IslamicAppBooksProvider implements IslamicBooksProvider {
       : undefined;
     const notice = new SearchNoticeBuilder(this.searchCapabilities);
 
-    // كل ما هو مدعوم على الخادم يُنفَّذ هناك، وما عداه يُعلن للمستخدم.
+    // ما يدعمه الخادم يُنفَّذ هناك وما عداه يُعلن للمستخدم.
     if (author) {
       notice.unsupported(
         "المؤلف",
@@ -413,7 +381,6 @@ export class IslamicAppBooksProvider implements IslamicBooksProvider {
       );
     }
 
-    // 1) النص → بحث دلالي على الخادم.
     if (term) {
       const search = new URLSearchParams({ q: term, limit: "50" });
       const payload = dataOf(
@@ -455,7 +422,7 @@ export class IslamicAppBooksProvider implements IslamicBooksProvider {
       };
     }
 
-    // 2) بلا نص: فلترة تصنيف/مؤلف على الخادم (books يدعمGenre وauthor).
+    // بلا نص: التصنيف والمؤلف مدعومان على الخادم في books.
     if (genre || author) {
       const result = await this.listBooks({
         genre,
@@ -468,7 +435,6 @@ export class IslamicAppBooksProvider implements IslamicBooksProvider {
       return { ...result, notices: [notice.build(SOURCE, SOURCE_NAME)] };
     }
 
-    // 3) تصفّح عادي بلا فلاتر.
     const result = await this.listBooks({ page, perPage });
     return { ...result, notices: [notice.build(SOURCE, SOURCE_NAME)] };
   }
@@ -516,8 +482,7 @@ export class IslamicAppBooksProvider implements IslamicBooksProvider {
       if (url && !book.sourceUrl) book.sourceUrl = url;
     }
 
-    // الفهرس من نفس حزمة النص: أرقام الصفحات هنا هي نفسها التي يعرضها
-    // القارئ، فالنقر على عنوان في الفهرس ينتقل للصفحة الصحيحة بالضبط.
+    // الفهرس من حزمة النص نفسها ⇒ أرقام الصفحات هي التي يعرضها القارئ.
     let chapters: IslamicBookChapter[] | undefined;
     if (raw.has_text === true) {
       try {
@@ -541,8 +506,7 @@ export class IslamicAppBooksProvider implements IslamicBooksProvider {
     const slug = str(rawId);
     if (!slug) return undefined;
     try {
-      // ‎/text يحمل العنوان والصفحة والنص معًا ⇒ فهرس متوافق تمامًا مع
-      // صفحة القراءة. ‎/chapters (فهرس مسطّح بلا نص) احتياط عند فشل ‎/text.
+      // ‎/text يعطي العنوان والصفحة والنص معًا ⇒ فهرس متوافق مع صفحة القراءة، و‎/chapters (بلا نص) احتياط عند فشله.
       const bundle = await fetchBookText(slug);
       if (bundle.sections.length > 0) {
         return bundle.sections.map((section, index) => ({
@@ -578,11 +542,8 @@ export class IslamicAppBooksProvider implements IslamicBooksProvider {
     }
   }
 
-  /**
-   * صفحة-بصفحة مُشتقّة من نص الكتاب المُخزَّن (لا يوجد ‎/page عند المصدر).
-   * الصفحة المطلوبة قد تقع داخل فصل ⇒ نختار الفصل الحاوي، ويُعاد عنوانه
-   * كـ heading ليبقى المستخدم يعرف أين هو.
-   */
+/** صفحة-بصفعة مُشتقّة من نص الكتاب المُخزَّن (لا ‎/page عند المصدر)؛ نعيد
+   * عنوان الفصل الحاوي كـ heading ليعرف المستخدم أين هو. */
   async getBookPage(
     rawId: string,
     pageNumber: number,

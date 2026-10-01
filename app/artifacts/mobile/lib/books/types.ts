@@ -1,33 +1,21 @@
 /**
- * النماذج الموحّدة لمكتبة الكتب الإسلامية + قدرات كل مزوّد.
- *
- * لا يُضاف أي حقل يُخترع من خارج المصدر: أي قيمة غير موجودة في استجابة
- * المزوّد تبقى undefined ولا تُستبدل بنصوص اصطناعية.
+ * النماذج الموحّدة لمكتبة الكتب الإسلامية + قدرات كل مزوّد: لا يُضاف أي حقل
+ * مخترَع من خارج المصدر، وأي قيمة غير موجودة في استجابة المزوّد تبقى undefined.
  */
 
 export type IslamicLibrarySource = "turath" | "islamhouse" | "islamicapp";
 
 /** قدرات الكتاب — ما يوفره المصدر فعلًا فقط، حتى لا تظهر أزرار ميتة. */
 export type IslamicBookCapabilities = {
-  /** قراءة داخل التطبيق/عبر المصدر. */
   canReadOnline: boolean;
-  /** قراءة نصية صفحة بصفحة (تراث). */
   canReadByPage: boolean;
-  /** فهرس/أبواب داخل الكتاب. */
   canGetChapters: boolean;
-  /** بحث داخل الكتاب. */
   canSearchInside: boolean;
-  /** ملف (PDF…) قابل للتحميل. */
   canDownload: boolean;
-  /** يُسمح بتخزين محلي وفق سياسة المصدر. */
   canStoreOffline: boolean;
-  /** إعادة جلب لآخر تحديث. */
   canUpdate: boolean;
-  /**
-   * وحد التنقّل هو **الفصل** لا الصفحة (islamic.app: ‎/text يُعطي فصولًا،
-   * وأرقام الصفحات فيها متفرّقة). القارئ عندها يتنقّل بين صفحات بداية
-   * الفصول، فلا يعرض نفس النص على أرقام صفحات متجاورة.
-   */
+  /** وحدة التنقّل هي **الفصل** لا الصفحة عند islamic.app (‎/text فصول بأرقام
+   *  صفحات متفرّقة) فلا يُعرض نفس النص على صفحات متجاورة. */
   readsByChapter?: boolean;
 };
 
@@ -51,7 +39,6 @@ export const ISLAMHOUSE_CAPABILITIES: IslamicBookCapabilities = {
   canUpdate: true,
 };
 
-/** قدرات البحث المتحقَّق منها حيًا (انظر توثيق BookSearchCapabilities). */
 export const TURATH_SEARCH_CAPABILITIES: BookSearchCapabilities = {
   canSearchText: true,
   canFilterByCategory: true,
@@ -74,18 +61,14 @@ export const ISLAMHOUSE_SEARCH_CAPABILITIES: BookSearchCapabilities = {
 
 /**
  * islamic.app (api.islamic.app/v1/library) — تحقّق حيّ 2026-09:
- *  - /library/genres                     → 11 تصنيفًا مع عدد كتب ✅
- *  - /library/books?genre=&author=&school= → فلترة على الخادم ✅ + ترقيم
- *  - /library/search?q=                 → بحث دلالي على الخادم ✅
- *  - /library/authors                   → 332 مؤلفًا + كتبهم ✅
- *  - /library/books/{slug}/chapters|…/text|/file?format=pdf ✅
- *  - لا فلترة بالنص على /books وحده (q غير مُفعَّل: total يبقى 563) ❌
+ *  - /genres (11 تصنيفًا + count) ✅ · /books?genre=&author=&school= فلترة وترقيم ✅
+ *  - /search?q= دلالي ✅ · /authors (332 + كتبهم) ✅ · /books/{slug}/chapters|text|file ✅
+ *  - ‎q على ‎/books وحده غير مُفعَّل (total يبقى 563) ❌
  */
 export const ISLAMICAPP_CAPABILITIES: IslamicBookCapabilities = {
   canReadOnline: true,
-  // ‎/text موجود (متحقَّق: تفسير 203 صفحات ⇒ 153 فصلًا بنصّ)، والصفحات
-  // تُشتقّ منه محليًّا. لكن has_text **لكل كتاب على حدة**، فبعض الكتب PDF
-  // فقط ⇒ تُخفى القراءة في الشاشة حسب `book.hasText` لا حسب المزوّد.
+  // ‎/text موجود (153 فصلًا بنصّ في كتاب 203 صفحات) والصفحات تُشتقّ منه محليًّا؛ لكن
+  // has_text لكل كتاب على حدة ⇒ بعض الكتب PDF فقط فتُخفى القراءة حسب book.hasText.
   canReadByPage: true,
   canGetChapters: true,
   canSearchInside: false,
@@ -132,6 +115,15 @@ export type IslamicBookAttachment = {
   type?: string;
 };
 
+/**
+ * القراءة داخل التطبيق — ثلاثة أحكام: readable = مصدره يوفّر نصًّا صفحة-بصفحة
+ * وتحقّقنا من مساره (تراث)؛ pdf-only = لا نصّ إطلاقًا (المصدر يعلن has_text=false
+ * أو لا يملك نقطة نهاية نصّ أصلًا كإسلام هاوس)؛ unverified = المصدر يعلن نصًّا
+ * ولا سبيل لتأكيده (islamic.app: ٥٥ كتابًا من ٥٦٣ يُرجع ‎413 payload_oversize
+ * على ‎/text)، ولا نَعِد بالقراءة إلا في الأول.
+ */
+export type BookReadability = "readable" | "pdf-only" | "unverified";
+
 export type IslamicBook = {
   id: string;
   source: IslamicLibrarySource;
@@ -150,11 +142,9 @@ export type IslamicBook = {
   language?: string;
   pages?: number;
   infoLong?: string;
-  /**
-   * هل نصّ الكتاب متاح للقراءة داخل التطبيق؟ (islamic.app: ‎has_text لكل كتاب)
-   * نعتمد عليه في إظهار زر «ابدأ القراءة» بدل قدرة المزوّد الثابتة.
-   */
+  /** has_text الخام من المصدر — إشارة ضعيفة: لا تعني إمكانية القراءة. */
   hasText?: boolean;
+  readability?: BookReadability;
   /** صفحة داخل الكتاب (نتائج البحث الداخلي تراث). */
   sourcePage?: number;
 };
@@ -190,37 +180,22 @@ export type IslamicBookSearchResult = {
   notices?: BookSearchNotice[];
 };
 
-/* -------------------------------------------------------------------------- */
-/* البحث المتقدم — قدرات حقيقية مُتحقَّق منها حيًا قبل البناء                */
-/* -------------------------------------------------------------------------- */
 
 /**
  * قدرات البحث **المتحقَّق منها** لكل مزوّد (لا شيء هنا مُتَوَهَّم):
- *
- * تراث (api.turath.io ver=3):
- *  - /search?q=&page=            → نص حر داخل المحتوى ✅ (q إلزامي: بدونه 400)
- *  - /search?...&cat=<id>        → فلترة تصنيف من المصدر ✅
- *  - /search?...&author=<id>     → فلترة مؤلف بالمعرّف الرقمي فقط ✅
- *  - لا يوجد: بحث بالعنوان وحده ❌ / بحث باسم المؤلف نصيًا ❌ / تعداد تصنيفات ❌
- *
- * إسلام هاوس (api3 v3):
- *  - /main/get-category-items/{id}/...  → فلترة تصنيف من المصدر ✅
- *  - /main/get-author-items/{id}/...   → فلترة مؤلف بالمعرّف ✅
- *  - لا يوجد: أي بحث نصي (/main/search = 404) ❌ ولا بحث بالعنوان ❌
- *    ولا lookup باسم المؤلف ❌ → النصي هنا تصفية محلية محدودة ومُعلَنة.
+ * تراث (api.turath.io ver=3): ‎/search?q=&page= نص حر داخل المحتوى ✅ (q إلزامي
+ * بدونه 400)، وcat=<id> وauthor=<id> بأرقام فقط ✅؛ لا بحث بالعنوان ❌ ولا
+ * باسم المؤلف نصًّا ❌ ولا تعداد تصنيفات ❌.
+ * إسلام هاوس (api3 v3): get-category-items وget-author-items فلترة على الخادم ✅؛
+ * لا بحث نصي (/main/search = 404) ❌ ولا بالعنوان ❌ ولا lookup باسم المؤلف ❌
+ * ⇒ النصي هنا تصفية محلية محدودة ومُعلَنة.
  */
 export type BookSearchCapabilities = {
-  /** بحث نصي على خادم المصدر. */
   canSearchText: boolean;
-  /** فلترة بالتصنيف (id) على الخادم. */
   canFilterByCategory: boolean;
-  /** فلترة بالمؤلف (معرّف رقمي) على الخادم. */
   canFilterByAuthorId: boolean;
-  /** فلترة باسم المؤلف (نصًا) على الخادم. */
   canFilterByAuthorName: boolean;
-  /** فلترة باسم الكتاب (نصًا) على الخادم. */
   canFilterByTitle: boolean;
-  /** البحث النصي يتم محليًا على ما أعطاه المصدر (لا endpoint نصي). */
   textSearchIsLocal: boolean;
   /** المصدر يرفض أي استعلام بلا كلمة نصية (تراث: q إلزامي). */
   requiresTextTerm: boolean;
@@ -239,13 +214,12 @@ export type BookSearchFilters = {
   source?: BookSearchSource;
 };
 
-/** خطوة تنفيذ واحدة: هل جرت على الخادم أم محليًا أم غير مدعومة أصلًا. */
+/** خطوة تنفيذ واحدة: نطاقها الخادم أم محلي أم غير مدعومة أصلًا. */
 export type BookSearchPlanStep = {
   label: string;
   scope: "server" | "client" | "unsupported";
 };
 
-/** تقرير صريح لكل مصدر: ما الذي نُفِّذ على الخادم وما الذي تصفّى محليًا. */
 export type BookSearchNotice = {
   source: IslamicLibrarySource;
   sourceName: string;

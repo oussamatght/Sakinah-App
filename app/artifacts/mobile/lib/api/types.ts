@@ -1,9 +1,6 @@
 /**
- * Shared domain types for direct provider calls.
- *
- * The mobile app no longer talks to @workspace/api-server; screens consume
- * these shapes directly. They intentionally match the shapes the server used
- * to normalize to, so screens compile unchanged.
+ * Shared domain types for direct provider calls (no @workspace/api-server);
+ * shapes intentionally match the server's normalization so screens compile unchanged.
  */
 
 export type QuranChapter = {
@@ -55,9 +52,8 @@ export type QuranJuz = {
 };
 
 /**
- * صفحة مصحف حقيقية: مجموعة آيات تشترك في نفس verse.page القادم من
- * alquran.cloud (المصحف العثماني القياسي 604 صفحة) — أساس عرض "نص متصل
- * بصفحات" في القارئ. تُبنى عبر groupQuranVersesByPage() في quran.ts.
+ * صفحة مصحف حقيقية: آيات تشترك في نفس verse.page من alquran.cloud (604 صفحة)
+ * — أساس العرض المتصل، وتُبنى عبر groupQuranVersesByPage() في quran.ts.
  */
 export type QuranPageGroup = {
   page: number;
@@ -79,18 +75,13 @@ export type QuranTafsir = {
 };
 
 /**
- * Unified hadith shape (project-wide):
- *   book        — الشرعي: اسم الكتاب ("صحيح البخاري")، أو اسم التصنيف/الموسوعة
- *                 للمصادر الموضوعية. Never the technical API provider name.
- *   reference   — التخريج الحقيقي من المصدر فقط؛ يبقى فارغًا إن لم يقدمه
- *                 المصدر (المعرّف الداخلي ليس مرجعًا علميًا).
- *   grade       — الدرجة كما وردت من المصدر بلا تحوير. اختيارية إجباريًا:
- *                 مصدر الكتب (hadis-api-id) لا يقدمها إطلاقًا، فتبقى undefined
- *                 والواجهة تعرض "درجة الحديث غير متوفرة" — لا استنتاج من اسم الكتاب.
- *   attribution — الراوي/من رواه، إن توفر.
- *   explanation — شرح المصدر، منفصل عن نص الحديث ولا يُعرض مكانه أبدًا.
- *   apiSource   — تقني للتصحيح فقط ("hadeethenc.com" | "hadis-api-id")؛
- *                 لا تُعرض في الواجهة أبدًا.
+ * hadith موحّدة (على مستوى المشروع):
+ *   book        — الاسم الشرعي (كتاب أو تصنيف)، لا اسم المزوّد التقني أبدًا.
+ *   reference   — التخريج الحقيقي من المصدر فقط؛ فارغ إن لم يقدّمه المصدر.
+ *   grade       — كما وردت بلا تحوير، اختيارية: hadis-api-id لا يقدّمها أبدًا
+ *                 فتبقى undefined وتعرض الواجهة "غير متوفرة" — لا استنتاج من الاسم.
+ *   explanation — شرح المصدر، منفصل عن النص ولا يُعرض مكانه أبدًا.
+ *   apiSource   — تقني للتصحيح فقط، لا يُعرض في الواجهة أبدًا.
  */
 export type HadithItem = {
   id: string;
@@ -136,24 +127,25 @@ export type PrayerTimesResult = {
 };
 
 /**
- * Thrown by every fetcher — message is Arabic, ready to show inline.
- *
- * `offline` يحسم ما إذا كان الفشل بسبب انقطاع الشبكة فعلًا: فشل fetch يعني
- * بسبب الشبكة فقط، أما خطأ HTTP أو JSON تالف فهو خلل في الخدمة وليس انقطاعًا.
- * بدون هذا التمييز تُعرض رسالة "لا يوجد اتصال" على أي خطأ حتى والواي فاي شغّال.
+ * thrown by every fetcher — Arabic message ready to show inline.
+ * `offline` يفصل انقطاع الشبكة (فشل fetch) عن خلل الخدمة (HTTP أو JSON تالف)،
+ * وإلا عُرضت رسالة "لا يوجد اتصال" على أي خطأ والواي فاي شغّال.
  */
 export class UpstreamError extends Error {
   readonly source: string;
   readonly offline: boolean;
-  constructor(source: string, message?: string, offline = false) {
-    super(message ?? `تعذر الوصول إلى ${source}، تحقق من اتصالك وحاول مجددًا.`);
+  /** رمز حالة HTTP إن وُجد — يميّز «المحتوى غير متاح» (413/404) عن «المشغول» (5xx). */
+  readonly status?: number;
+  constructor(source: string, message?: string, offline = false, status?: number) {
+    super(message ?? `تعذر تحميل البيانات من ${source}؟ تحقّق من اتصالك ثم أعد المحاولة.`);
     this.name = "UpstreamError";
     this.source = source;
     this.offline = offline;
+this.status = status;
   }
 }
 
-/** أذكار الصباح والمساء — كما وردت في المصدر (المستودع أعلاه). */
+/** أذكار الصباح والمساء — كما وردت في مصدر Seen-Arabic. */
 export type Dhikr = {
   order: number;
   content: string;

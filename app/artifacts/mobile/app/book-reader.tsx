@@ -26,15 +26,23 @@ import {
 } from "@/hooks/useIslamicBooks";
 import { parseBookSource, providerCapabilities } from "@/lib/books";
 import type { IslamicLibrarySource } from "@/lib/books/types";
+import { UpstreamError } from "@/lib/api/types";
 
 function toArabicDigits(value: number | string): string {
   return String(value).replace(/[0-9]/g, (digit) => "٠١٢٣٤٥٦٧٨٩"[Number(digit)]);
 }
 
 /**
- * تحويل صفحة تراث (HTML خفيف) إلى نص مع محافظة على فواصل الأسطر.
- * لا نعرض وسومًا خامًا ولا نستدعي أي مُحرِّك HTML خارجي.
+ * المحتوى مرفوض نهائيًا لا مؤقّتًا: 413 (نصّ ضخم) و404/415/501 (لا نقطة نهاية
+ * لهذا الكتاب) — إعادة المحاولة لن تنجح، فلا نعرض "حاول مجددًا".
  */
+function isContentUnavailable(error: unknown): boolean {
+  const status = error instanceof UpstreamError ? error.status : undefined;
+  return status === 413 || status === 404 || status === 415 || status === 501;
+}
+
+/** تحويل صفحة تراث (HTML خفيف) إلى نص مع حفظ فواصل الأسطر — بلا وسوم خام
+ *  ولا مُحرِّك HTML خارجي. */
 function htmlToText(html: string): string {
   return html
     .replace(/<\s*\/?\s*(?:p|div|section|article|br|h[1-6]|li|blockquote|tr|table)[^>]*\/?\s*>/gi, "\n")
@@ -62,8 +70,8 @@ export default function BookReader() {
     pages?: string;
   }>();
 
-  // نفس قاعدة book-details: مصدر غير معروف ⇒ null بدل الطي على "turath"
-  // (كان يجعل قارئ تراث يطلب slug إسلاميك/إسلام هاوس فيبقى فارغًا).
+  // نفس قاعدة book-details: مصدر غير معروف ⇒ null لا الطي على "turath" (كان يجعل
+  // قارئ تراث يطلب slug إسلاميك فيبقى فارغًا).
   const source = parseBookSource(params.source);
   const rawId = params.rawId ?? "";
   const missingParams = !source || !rawId;
@@ -84,9 +92,8 @@ export default function BookReader() {
   const chaptersQuery = useLibraryBookChapters(typedSource, rawId || undefined);
 
   /**
-   * تنقّل «فصل-فصل» للمصادر التي وحدها هو الفصل (islamic.app: أرقام
-   * الصفحات متفرّقة، وعرض نفس النص على 5 و6 و7 يربك القارئ). لمصادر
-   * الصفحات (تراث) يبقى التنقّل صفحة-بصفحة فلا يُفقد أي محتوى.
+   * تنقّل «فصل-فصل» للمصادر التي وحدها هو الفصل (أرقام صفحاتها متفرّقة، وعرض
+   * النص نفسه على ٥ و٦ و٧ يربك القارئ)؛ لمصادر الصفحات يبقى صفحة-بصفحة.
    */
   const chapterPages = useMemo(() => {
     const pages = (chaptersQuery.data ?? [])
@@ -115,8 +122,7 @@ export default function BookReader() {
   const canGoPrevious = previousTarget !== undefined;
   const canGoNext = nextTarget !== undefined;
 
-  // جلب صفحة واحدة فقط مسبقًا (لا الكتاب كاملًا) — نفس مفتاح الاستعلام، فلا
-  // يتكرر الطلب عند الضغط على «التالي».
+  // جلب صفحة واحدة فقط مسبقًا (لا الكتاب) — نفس مفتاح الاستعلام فلا يتكرر الطلب.
   usePrefetchNextBookPage({
     enabled: rawId.length > 0 && !missingParams && canGoNext,
     source: typedSource,
@@ -129,6 +135,12 @@ export default function BookReader() {
     () => (pageQuery.data ? htmlToText(pageQuery.data.text) : ""),
     [pageQuery.data],
   );
+
+  // مصدر لا يُقرأ داخل التطبيق (إسلام هاوس) أو رفض المصدر المحتوى نهائيًا.
+  const contentUnavailable =
+    source != null &&
+    (providerCapabilities(source).canReadByPage === false ||
+      isContentUnavailable(pageQuery.error));
 
   return (
     <Screen scroll={false}>
@@ -180,12 +192,11 @@ export default function BookReader() {
       </View>
 
       {indexVisible && chaptersQuery.data && chaptersQuery.data.length > 0 ? (
-        // FlatList لا ScrollView+map: فهرس تراث قد يكون آلاف العناوين،
-        // ووجوده داخل View (لا ScrollView) فلا تحذير VirtualizedList متداخل.
+        // FlatList لا ScrollView+map: فهرس تراث قد يكون آلاف العناوين، وداخل View
+        // (لا ScrollView) يُطلق تحذير VirtualizedList متداخل.
         <FlatList
           data={chaptersQuery.data}
-          // الفهرس قد يحوي عنوانين بنفس المعرّف عند تراث (عناوين مكرّرة في
-          // الشجرة) ⇒ معرّف فريد فعلًا بتركيبة المعرّف والترتيب.
+          // عناوين مكرّرة في شجرة تراث ⇒ معرّف فريد فعلًا بتركيبة المعرّف والترتيب.
           keyExtractor={(chapter, index) => `${chapter.id}-${index}`}
           style={[
             styles.indexPanel,
@@ -232,39 +243,54 @@ export default function BookReader() {
         <LoadingState label="جاري تحميل الصفحة…" />
       ) : null}
       {!missingParams && pageQuery.isError ? (
-        <ErrorState
-          offline={isOfflineError(pageQuery.error)}
-          // تجاوزتَ نهاية الكتاب (صفحة بلا نص) ⇒ الرجوع للخلف أنفع من إعادة
-          // محاولة الطلب نفسه الذي لن ينجح.
-          title={page > 1 ? "لا توجد هذه الصفحة" : undefined}
-          message={
-            page > 1
-              ? "الصفحة المطلوبة فارغة؛ غالبًا تجاوزتَ آخر صفحة في الكتاب. ارجع صفحة للخلف."
-              : undefined
-          }
-          actionLabel={page > 1 ? "الرجوع للخلف" : undefined}
-          onRetry={
-            previousTarget !== undefined
-              ? () => setPage(previousTarget)
-              : () => void pageQuery.refetch()
-          }
-        />
+        contentUnavailable ? (
+          <ErrorState
+            title="محتوى الكتاب غير متاح للقراءة حاليًا"
+            message="لا يوفّر المصدر نصًّا قابلًا للعرض لهذا الكتاب. افتح ملف PDF من صفحة تفاصيل الكتاب أو ارجع إلى المكتبة."
+            actionLabel="العودة إلى المكتبة"
+            onRetry={() => router.replace("/books")}
+          />
+        ) : (
+          <ErrorState
+            offline={isOfflineError(pageQuery.error)}
+            // تجاوزتَ نهاية الكتاب (صفحة بلا نص) ⇒ الرجوع للخلف أنفع من تكرار الطلب.
+            title={page > 1 ? "لا توجد هذه الصفحة" : undefined}
+            message={
+              page > 1
+                ? "الصفحة المطلوبة فارغة؛ غالبًا تجاوزتَ آخر صفحة في الكتاب. ارجع صفحة للخلف."
+                : undefined
+            }
+            actionLabel={page > 1 ? "الرجوع للخلف" : undefined}
+            onRetry={
+              previousTarget !== undefined
+                ? () => setPage(previousTarget)
+                : () => void pageQuery.refetch()
+            }
+          />
+        )
       ) : null}
-      {/* لا نص في هذه الصفحة (كتاب بلا فهرس/مصدر لا يوفّر صفحات) — قبل هذا
-          الشرط كانت الشاشة فارغة تمامًا بلا أي رسالة. */}
+      {/* صفحة بلا نص (كتاب بلا فهرس) — قبل هذا الشرط كانت الشاشة فارغة بلا رسالة. */}
       {!missingParams &&
       !pageQuery.isPending &&
       !pageQuery.isError &&
       plainText.trim().length === 0 ? (
         <ErrorState
-          message="لا يوجد نص متاح لهذه الصفحة من هذا المصدر. جرّب فهرس الكتاب أو حمّل ملف PDF."
-          onRetry={() => void pageQuery.refetch()}
+          message={
+            contentUnavailable
+              ? "محتوى الكتاب غير متاح للقراءة حاليًا من هذا المصدر. افتح ملف PDF من صفحة تفاصيل الكتاب."
+              : "لا يوجد نص متاح لهذه الصفحة من هذا المصدر. جرّب فهرس الكتاب أو حمّل ملف PDF."
+          }
+          actionLabel={contentUnavailable ? "العودة إلى المكتبة" : undefined}
+          onRetry={
+            contentUnavailable
+              ? () => router.replace("/books")
+              : () => void pageQuery.refetch()
+          }
         />
       ) : null}
 
       {pageQuery.data && plainText.trim().length > 0 ? (
         <>
-          {/* شريط الترقيم */}
           <View style={styles.pagerTop}>
             <Pressable
               accessibilityRole="button"

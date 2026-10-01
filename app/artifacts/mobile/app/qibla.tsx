@@ -8,12 +8,10 @@ import { radii, spacing, typography } from '@/constants/tokens';
 import { useColors } from '@/hooks/useColors';
 
 /**
- * Working Qibla compass:
- *  1. expo-location → device coordinates + permission handling.
- *  2. Great-circle bearing to the Kaaba (21.4225°N, 39.8262°E).
- *  3. Device heading (magnetometer) via Location.watchHeadingAsync — works on
- *     iOS & Android; on web it falls back to an absolute bearing readout.
- *  4. The dial rotates with Animated so the qibla marker aligns with reality.
+ * Working Qibla compass: device position + great-circle bearing to the Kaaba
+ * (21.4225N, 39.8262E) + magnetometer heading via watchHeadingAsync, with the
+ * dial rotated by Animated. On web there is no magnetometer, so only the
+ * absolute bearing is shown.
  */
 
 const KAABA = { latitude: 21.4225, longitude: 39.8262 };
@@ -47,14 +45,11 @@ export default function QiblaScreen() {
   const [sensorError, setSensorError] = useState(false);
 
   const spin = useRef(new Animated.Value(0)).current;
-  // Wrap-aware smoothing state (kept in refs — no re-render per sample):
-  //   headingRef = low-pass-filtered device heading (0..360)
-  //   dialRef    = cumulative dial angle so rotations always take the
-  //                shortest path and never jump when crossing north (359↔1).
+  // Wrap-aware smoothing in refs (no re-render per sample): dialRef holds the
+  // cumulative dial angle so rotations always take the shortest path (359↔1).
   const headingRef = useRef(0);
   const dialRef = useRef(0);
 
-  // 1) Get the device position once.
   useEffect(() => {
     let active = true;
     void (async () => {
@@ -89,9 +84,8 @@ export default function QiblaScreen() {
     };
   }, []);
 
-  // 2) Watch the compass heading while the screen is open.
   useEffect(() => {
-    if (Platform.OS === 'web') return; // no magnetometer on web — show bearing only
+    if (Platform.OS === 'web') return;
     let subscription: { remove: () => void } | null = null;
     let active = true;
     void (async () => {
@@ -102,14 +96,13 @@ export default function QiblaScreen() {
           if (!active) return;
           const value =
             Platform.OS === 'ios'
-              ? // trueHeading needs location; magHeading always available
+              ? // trueHeading يحتاج موقعًا، magHeading متاح دائمًا
                 headingInfo.trueHeading >= 0
                 ? headingInfo.trueHeading
                 : headingInfo.magHeading
               : headingInfo.magHeading ?? 0;
-          // Low-pass filter with wrap-around (0°/360°) awareness: move the
-          // smoothed heading 35% toward each raw sample along the SHORT arc,
-          // so the dial neither flickers nor sweeps the long way round.
+          // Low-pass filter with 0°/360° wrap awareness: move 35% toward each raw
+          // sample along the SHORT arc so the dial neither flickers nor sweeps back.
           const previous = headingRef.current;
           const delta = ((value - previous + 540) % 360) - 180;
           const smoothed = (previous + delta * 0.35 + 360) % 360;
@@ -137,9 +130,8 @@ export default function QiblaScreen() {
     [coordinates],
   );
 
-  // Rotate the dial so the Kaaba marker sits at (qiblaBearing − heading),
-  // advancing the CUMULATIVE angle by the shortest signed difference — the
-  // 0°/360° wrap never produces a full backwards sweep.
+  // Dial angle so the Kaaba marker sits at (qiblaBearing − heading), advancing
+  // the CUMULATIVE angle by the shortest signed difference (no 0°/360° sweep).
   useEffect(() => {
     const absolute = heading !== null ? qiblaBearing - heading : qiblaBearing;
     const delta = ((absolute - dialRef.current + 540) % 360) - 180;
@@ -210,7 +202,6 @@ export default function QiblaScreen() {
               { transform: [{ rotate }] },
             ]}
           >
-            {/* Kaaba marker at the top of the rotating dial */}
             <View style={styles.kaabaWrap}>
               <View style={[styles.kaaba, { backgroundColor: colors.primary }]}>
                 <View style={[styles.kaabaBand, { backgroundColor: colors.accent }]} />

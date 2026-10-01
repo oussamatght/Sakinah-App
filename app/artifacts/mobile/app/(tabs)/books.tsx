@@ -49,16 +49,18 @@ const EMPTY_ADVANCED: AdvancedSearchValue = {
 };
 
 /**
- * الفعل المتاح للبطاقة — من قدرات المصدر **وحالة الكتاب نفسه** معًا.
- * كان ينظر لقدرة المصدر وحدها: كتب إسلاميك PDF-only (has_text=false)
- * كانت تعرض «قراءة» على البطاقة ثم بلا زر «ابدأ القراءة» في التفاصيل
- * ⇒ المستخدم يضغط فيجد لا شيء للقراءة.
+ * ما ReallyBrowser يمكن للمستخدم فعله بهذا الكتاب.
+ * «قراءة» لا تُعرض إلا مع readability=readable: فـhas_text من إسلاميك يكذب على
+ * ٥٥ كتابًا تُرجع ‎/text خطأ 413، فوعد القراءة ثم إرساله إلى صفحة بلا نص أسوأ.
  */
 function actionLabelFor(book: IslamicBook): string {
   const capabilities = providerCapabilities(book.source);
-  if (capabilities.canReadByPage && book.hasText !== false) return "قراءة";
-  if (capabilities.canDownload && (book.attachments?.length || book.downloadUrl))
+  if (book.readability === "readable" && capabilities.canReadByPage) {
+    return "قراءة";
+  }
+  if (capabilities.canDownload && (book.attachments?.length || book.downloadUrl)) {
     return "PDF";
+  }
   return "تفاصيل";
 }
 
@@ -79,9 +81,8 @@ export default function BooksTab() {
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
   /**
-   * التصنيف المختار = (المصدر + المعرّف). معرّفات التصنيف فضاء منفصل لكل
-   * مصدر (أرقام إسلام هاوس مقابل slugs إسلاميك)، فاختيارها بلا مصدر
-   * يخلطها ويجعل التصفية ترجع "لا عناصر".
+   * التصنيف المختار = (المصدر + المعرّف): معرّفات كل مصدر فضاء منفصل (أرقام
+   * إسلام هاوس مقابل slugs إسلاميك)، فاختيارها بلا مصدر يخلطها فيرجع "لا عناصر".
    */
   const [selectedCategory, setSelectedCategory] = useState<{
     source: IslamicLibrarySource;
@@ -90,8 +91,7 @@ export default function BooksTab() {
   } | null>(null);
   const [page, setPage] = useState(1);
 
-  // البحث المتقدم: مسودة منفصلة + نسخة «مُقدَّمة» لا تتغيّر إلا بضغط «بحث»
-  // (لا طلب شبكة على كل ضغطة مفتاح).
+  // البحث المتقدم: مسودة منفصلة + نسخة «مُقدَّمة» لا تتغيّر إلا بضغط «بحث» (لا طلب على كل ضغطة مفتاح).
   const [sheetVisible, setSheetVisible] = useState(false);
   const [advanced, setAdvanced] = useState<AdvancedSearchValue>(EMPTY_ADVANCED);
   const [appliedAdvanced, setAppliedAdvanced] =
@@ -100,11 +100,8 @@ export default function BooksTab() {
 
   /**
    * شرائح التصفّح: الفروع **الصالحة** وحدها.
-   *
-   * كانت الشريحة تستخدم categories/showall من إسلام هاوس (٤٣٧ عنصرًا) وهي
-   * معرّفات من فضاء مختلف: أي منها يُرجع "لا عناصر" دائمًا عند
-   * get-category-items، إضافةً إلى رسم مئات العناصر دفعة واحدة. الآن:
-   *  - ١٦ فرعًا حقيقيًا من إسلام هاوس (viewcat) + ١١ نوعًا من إسلاميك.
+   * كانت الشريحة تستخدم categories/showall من إسلام هاوس (٤٣٧ عنصرًا) وهي معرّفات
+   * من فضاء مختلف تُرجع "لا عناصر" دائمًا، مع رسم مئات العناصر دفعة واحدة.
    */
   const islamHouseBranchesQuery = useLibraryCategoryBranches("islamhouse");
   const islamicAppGenresQuery = useLibraryCategories("islamicapp");
@@ -156,7 +153,6 @@ export default function BooksTab() {
     perPage: PAGE_SIZE,
   });
 
-  // البحث المتقدم يتفوّق على البحث البسيط عند تطبيق فلاتر.
   const books = advancedActive
     ? (advancedQuery.data?.items ?? [])
     : (listQuery.data?.items ?? []);

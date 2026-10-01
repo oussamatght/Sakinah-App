@@ -26,11 +26,7 @@ const RESULTS_STALE_TIME = 30_000;
 /** الفلاتر تُعدَّل يدويًا؛ نترك نافذة قصيرة ثم نخزّن أطول. */
 const SEARCH_STALE_TIME = 2 * 60_000;
 
-/**
- * بحث مشترك بين مصدري المكتبة (تراث + إسلام هاوس).
- * مع استعلام فارغ يُرجع قائمة التصفح (إسلام هاوس فقط — تراث لا يملك
- * نقطة تصفح قائمة، مُتحقق).
- */
+/** بحث مشترك بين المصدري (تراث + إسلام هاوس)؛ الاستعلام الفارغ يُرجع قائمة التصفح وهي إسلام هاوس فقط (تراث بلا نقطة تصفح، مُتحقق). */
 export function useSearchLibraryBooks(
   query: string,
   page = 1,
@@ -116,12 +112,7 @@ export function useLibraryCategories(source: IslamicLibrarySource) {
   });
 }
 
-/**
- * فروع المستوى الأول الحقيقية — طلب واحد، مخزَّن ساعة.
- *
- * `enabled` يسمح بتأجيل الجلب حتى تُفتح نافذة البحث فعلًا: النافذة مُركَّبة
- * دائمًا، فبدونه كانت الشاشة تُطلق طلب التصنيفات عند فتح تبويب الكتب.
- */
+// `enabled` يؤجّل الجلب حتى تُفتح نافذة البحث فعلًا: النافذة مُركَّبة دائمًا، فبدونه كان الطلب يُطلق عند فتح تبويب الكتب.
 export function useLibraryCategoryBranches(
   source: IslamicLibrarySource,
   options?: { enabled?: boolean },
@@ -134,10 +125,7 @@ export function useLibraryCategoryBranches(
   });
 }
 
-/**
- * أبناء فرع واحد — مفتاح لكل فرع على حدة. الفروع تُفتح بالطلب فقط، فلا
- * نحمّل شجرة إسلام هاوس (٤٨٩٩ عقدة) دفعة واحدة.
- */
+// أبناء فرع واحد — مفتاح لكل فرع، وتُطلب الفروع عند الفتح فلا نحمّل شجرة إسلام هاوس (٤٨٩٩ عقدة) دفعة.
 export function useLibraryCategoryChildren(
   source: IslamicLibrarySource,
   nodeId: string | undefined,
@@ -152,11 +140,9 @@ export function useLibraryCategoryChildren(
 }
 
 /**
- * البحث المتقدم — كل تركيبة فلاتر لها مفتاحها الخاص، فالعودة إلى بحث سابق
- * تُعرض من الكاش فورًا. الفلاتر تُطبَّع (trim + "" بدل undefined) حتى لا
- * يتغيّر المفتاح بسبب قيمة فارغة أو فراغ فقط.
- *
- * البحث لا يعمل إلا بفلتر واحد على الأقل (بلا ذلك لا نطلق أي طلب).
+ * لكل تركيبة فلاتر مفتاحها الخاص فالعودة لبحث سابق تُعرض من الكاش فورًا؛ الفلاتر
+ * تُطبَّع (trim + "" بدل undefined) ثباتًا للمفتاح، ولا يعمل البحث إلّا بفلتر واحد
+ * على الأقل.
  */
 export function useLibraryAdvancedSearch(filters: {
   mode: BookSearchMode;
@@ -182,8 +168,7 @@ export function useLibraryAdvancedSearch(filters: {
   const enabled = hasAnySearchFilter(normalized);
 
   return useQuery({
-    // كائن الفلاتر بعد التطبيع: مفتاح مستقر (React Query يفرز مفاتيح الكائن)
-    // ولكل تركيبة صفحة/مصدر/تصنيف مدخلتها الخاصة.
+    // كائن الفلاتر بعد التطبيع: مفتاح مستقر (React Query يفرز مفاتيح الكائن).
     queryKey: ["library-books", "advanced-search", normalized],
     queryFn: () => searchLibraryBooksAdvanced(normalized),
     enabled,
@@ -194,13 +179,9 @@ export function useLibraryAdvancedSearch(filters: {
 }
 
 /**
- * مزوّدو الكتب يُرجعون `undefined` عند "غير مدعوم/غير موجود" (لأن واجهة
- * `IslamicBooksProvider` تُرجع `T | undefined`)، لكن React Query يرفض
- * `undefined` كبيانات ويطلق:
- *   "Query data cannot be undefined. Please make sure to return a value
- *    other than undefined from your query function."
- * فكل استعلام هنا يحوّل undefined إلى **خطأ صريح** (UnknownBookError) قابل
- * للعرض في الشاشة، أو `null` إن كان الغياب طبيعيًا (فهرس/مؤلف غير موجود).
+ * المزوّدون يُرجعون `undefined` عند "غير مدعوم/غير موجود"، وReact Query يرفضه كبيانات
+ * ("Query data cannot be undefined")، فكل استعلام هنا يحوّله إلى خطأ صريح
+ * (UnknownBookError) قابل للعرض، أو `null` إن كان الغياب طبيعيًا.
  */
 class UnknownBookError extends Error {
   constructor(source: IslamicLibrarySource, rawId: string, what: string) {
@@ -233,7 +214,7 @@ export function useLibraryBookChapters(
     queryKey: ["library-book", "chapters", source, rawId],
     queryFn: async () => {
       const chapters = await getLibraryBookChapters(source, rawId as string);
-      // الفهرس absence عادية (كتاب بلا فصول) ⇒ null لا undefined.
+      // غياب الفهرس طبيعي (كتاب بلا فصول) ⇒ null لا undefined.
       return chapters ?? null;
     },
     enabled: Boolean(source) && Boolean(rawId),
@@ -273,11 +254,8 @@ export function useLibraryAuthor(
   });
 }
 
-/**
- * جلب صفحة القارئ التالية في الخلفية — صفحة واحدة فقط، بنفس مفتاح الاستعلام
- * الذي سيستخدمه القارئ لاحقًا، فـ prefetchQuery يكتب في نفس المدخل ولا
- * يُطلق طلبًا ثانيًا عند فتح تلك الصفحة.
- */
+// جلب صفحة القارئ التالية في الخلفية — صفحة واحدة فقط وبنفس مفتاح الاستعلام
+// الذي سيستعمله القارئ لاحقًا، فيكتب prefetchQuery في المدخل نفسه بلا طلب ثانٍ.
 export function usePrefetchNextBookPage(params: {
   enabled: boolean;
   source: IslamicLibrarySource;

@@ -1,10 +1,6 @@
 import { readJson, removeKey, storageKeys, writeJson } from "./client";
 
-/**
- * Tasbih (digital misbaha) persistence — Task 4.
- * Each saved session keeps the dhikr name, count and creation time; the
- * history screen aggregates totals per dhikr text.
- */
+/** Tasbih (digital misbaha) persistence — each session keeps the dhikr name, count and creation time; the history screen aggregates totals per dhikr text. */
 
 export type TasbihEntry = {
   id: string;
@@ -19,7 +15,7 @@ export async function getTasbihHistory(): Promise<TasbihEntry[]> {
   return (await readJson<TasbihEntry[]>(storageKeys.tasbih)) ?? [];
 }
 
-/** Saves a completed session and returns the updated history (newest first). */
+/** Saves a session and returns the history, newest first. */
 export async function saveTasbihEntry(
   dhikr: string,
   count: number,

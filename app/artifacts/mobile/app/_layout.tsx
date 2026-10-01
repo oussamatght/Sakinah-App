@@ -22,7 +22,6 @@ import { configureNotificationHandler } from '@/lib/notifications/adhan';
 import { getSettings, getPrayerTimesCache } from '@/lib/storage';
 import { scheduleAdhanNotifications } from '@/lib/notifications/adhan';
 
-// Prevent the splash screen from auto-hiding before asset loading is complete.
 void SplashScreen.preventAutoHideAsync();
 
 I18nManager.allowRTL(true);
@@ -30,10 +29,7 @@ if (Platform.OS !== 'web') {
   I18nManager.forceRTL(true);
 }
 
-// Serverless data layer: providers are called directly from the device.
-// The async-storage persister keeps the whole query cache on disk — combined
-// with the Infinity staleTime on Quran text this gives real offline reading
-// of every surah the user has opened at least once.
+// The async-storage persister keeps the whole query cache on disk for offline reading.
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -54,18 +50,19 @@ const persister = createAsyncStoragePersister({
 });
 
 /**
- * استثناء نصوص المصحف من التخزين المؤقت الدائم.
- *
- * نصوص السور والتفسير والأجزاء ضخمة (آلاف الآيات)، وحفظها في AsyncStorage
- * كان يتجاوز حد التخزين فيظهر عند كل إقلاع:
- *   "Encountered an error attempting to restore client cache from persisted
- *    location. As a precaution, the persisted cache will be discarded."
- * فيُهمَل الكاش بالكامل ويصبح التطبيق بلا أي بيانات محفوظة — أي أن "العمل
- * بدون إنترنت" يتعطّل. ونصوص المصحف محفوظة أصلًا في SQLite (quranDb)، وهي
- * المسار الصحيح للقراءة بدون إنترنت، فلا نكررها هنا. القوائم والروابط
- * الصغيرة (فهرس السور، روابط الصوت، الكتب، الأحاديث، المواقيت) تُحفظ كما هي.
+ * استثناء نصوص المصحف من التخزين المؤقت الدائم: السور والتفسير والأجزاء ضخمة،
+ * وحفظها في AsyncStorage كان يتجاوز حد التخزين فيظهر تحذير "سيُهمَل الكاش
+ * المحفوظ" عند كل إقلاع، فيُهمَل الكاش بالكامل ويتعطّل العمل بدون إنترنت.
+ * ونصوص المصحف محفوظة أصلًا في SQLite (quranDb) فهو المسار الصحيح، بينما
+ * القوائم والروابط الصغيرة (فهرس السور، روابط الصوت، المواقيت) تُحفظ كما هي.
  */
 const NON_PERSISTED_QURAN_SEGMENTS = new Set(['surah', 'tafsir', 'juz']);
+
+/**
+ * نصوص الكتب لا تُحفظ: إسلاميك يعيد الكتاب كاملًا في استجابة واحدة، فتملأ
+ * AsyncStorage وتُلغي الكاش كله (الخطأ أعلاه). القوائم والفهارس الصغيرة تُحفظ.
+ */
+const NON_PERSISTED_BOOK_SEGMENTS = new Set(['page', 'text']);
 
 function shouldPersistQuery(query: {
   queryKey: readonly unknown[];
@@ -74,6 +71,9 @@ function shouldPersistQuery(query: {
   if (query.state.status !== 'success') return false;
   const [namespace, segment] = query.queryKey;
   if (namespace === 'quran' && typeof segment === 'string' && NON_PERSISTED_QURAN_SEGMENTS.has(segment)) {
+    return false;
+  }
+  if (namespace === 'library-book' && typeof segment === 'string' && NON_PERSISTED_BOOK_SEGMENTS.has(segment)) {
     return false;
   }
   return true;
@@ -113,9 +113,8 @@ export default function RootLayout() {
     void initThemePreference();
   }, []);
 
-  // Task 10: adhan scheduling — rescheduled on EVERY app open because prayer
-  // times shift daily. Only when the settings switch is on. Fails silently
-  // under Expo Go (see lib/notifications/adhan.ts).
+  // Task 10: reschedule adhan on EVERY app open because prayer times shift
+  // daily; silent under Expo Go (see lib/notifications/adhan.ts).
   useEffect(() => {
     if (Platform.OS === 'web') return;
     configureNotificationHandler();

@@ -2,15 +2,14 @@ import { openDatabaseSync, type SQLiteDatabase } from "expo-sqlite";
 import type { HadithItem } from "@/lib/api/types";
 
 /**
- * Offline hadith cache (Task 7) — same SQLite file as the Quran store.
+ * Offline hadith cache (Task 7) — same SQLite file as the Quran store, sync
+ * single-row point reads/writes only (fast, UI-safe).
  *
  * Strategy: NOT a full-database download (the nine books are millions of
- * characters). Instead an accumulative cache: every hadith the user browses
- * or favorites is upserted here, so previously-seen content stays readable
- * offline. Favorites are always persisted (the favorites module itself lives
- * in AsyncStorage; this cache makes their full text available offline).
- *
- * Sync calls only — single-row point reads/writes (fast, UI-safe).
+ * characters) but an accumulative cache — every browsed or favorited hadith is
+ * upserted so previously-seen content stays readable offline. Favorites are
+ * always persisted (the favorites module itself lives in AsyncStorage; this
+ * cache makes their full text available offline).
  */
 
 const DB_NAME = "sakinah-quran.db";
@@ -90,7 +89,7 @@ export function getOfflineHadith(id: string): HadithItem | null {
   }
 }
 
-/** Every hadith currently cached (bounded — cache grows by browsing only). */
+/** Every hadith cached (bounded — the cache grows by browsing only). */
 export function getOfflineHadiths(limit = 200): HadithItem[] {
   const db = getDb();
   if (!db) return [];

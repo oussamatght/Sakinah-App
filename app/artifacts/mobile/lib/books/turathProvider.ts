@@ -1,17 +1,11 @@
 /**
  * مزوّد تراث (api.turath.io, ver=3) — المسارات مُتحقّق منها حيًا:
- *   /search?q&page&ver=3              → بحث نصي في المحتوى (q إلزامي: بدونه 400)
- *   /search?...&cat=<id>&ver=3        → فلترة تصنيف على الخادم ✅
- *   /search?...&author=<id>&ver=3     → فلترة مؤلف (id رقمي) على الخادم ✅
- *   /book?id&include=indexes&ver=3    → meta + indexes (فهرس وأعداد الصفحات)
- *   /page?book_id&pg&ver=3            → نص الصفحة + meta.headings
- *   /author?id&ver=3                  → الاسم + السيرة
- *
- * غير مدعوم عند تراث: تعداد تصنيفات (لا نقطة تصفح)، فلترة بالعنوان وحده،
- * فلترة باسم المؤلف نصيًا (author= يقبل معرّفًا رقميًا فقط)، ملف تحميل، صور أغلفة.
- * ملاحظة: /search بحث في **محتوى** الكتب، فقد تُرجع نتائج لا يطابق عنوانها
- * العبارة — لذلك «اسم الكتاب» و«المؤلف» يضيّقان النتائج محليًا فوق نتائج
- * الخادم، وهذا مُعلن للمستخدم في تقرير البحث.
+ *   /search?q&page&ver=3 (نص داخل المحتوى، q إلزامي بدونه 400 + cat وauthor رقمي)
+ *   ✅ · /book?id&include=indexes&ver=3 (meta + indexes: فهرس وأعداد الصفحات) ·
+ *   /page?book_id&pg&ver=3 (نص الصفحة + meta.headings) · /author?id&ver=3 (الاسم
+ *   والسيرة). وغير مدعوم: تعداد تصنيفات، بالعنوان وحده، باسم المؤلف نصًّا، ملف
+ *   تحميل، صور أغلفة. ولأن ‎/search يبحث في **محتوى** الكتب فقد تُرجع نتائج لا
+ *   يطابق عنوانها العبارة، فيضيّق «اسم الكتاب» و«المؤلف» محليًا فوق الخادم (مُعلن).
  */
 
 import {
@@ -99,6 +93,8 @@ function normalizeSearchItem(raw: TurathSearchItemRaw): IslamicBook | null {
     sourceCategoryId: categoryId !== undefined ? String(categoryId) : undefined,
     sourceUrl: bookUrl(bookId),
     language: "ar",
+    // مسار تراث للقراءة متحقَّق منه: ‎/book?include=indexes ثم ‎/page.
+    readability: "readable",
     sourcePage: num(meta.page),
   };
 }
@@ -124,6 +120,7 @@ function normalizeBookDetails(payload: TurathBookPayload, rawId: string) {
     sourceUrl: bookUrl(safeId),
     language: "ar",
     pages: pageMap.length > 0 ? pageMap.length : undefined,
+    readability: "readable",
   };
 
   const headings = Array.isArray(indexes.headings) ? indexes.headings : [];
@@ -203,11 +200,7 @@ export class TurathBooksProvider implements IslamicBooksProvider {
     };
   }
 
-  /**
-   * البحث الموحّد. تراث يُنفّذ على الخادم: النص (q إلزامي) + cat + author.
-   * أما «اسم الكتاب» و«المؤلف» بالنص فيُضيَّقان **محليًا** فوق نتائج الخادم
-   * لأن المصدر لا يوفّر لهما endpoint خاصًا.
-   */
+  /** الخادم ينفّذ النص (q إلزامي) + cat + author، و«اسم الكتاب» و«المؤلف» بالنص يُضيَّقان **محليًا** (لا endpoint خاص). */
   async searchWithFilters(
     filters: BookSearchFilters & { page?: number; perPage?: number },
   ): Promise<IslamicBookSearchResult> {
@@ -278,12 +271,11 @@ export class TurathBooksProvider implements IslamicBooksProvider {
 
     const totalHits = num(payload.count, items.length) ?? items.length;
 
-    // تضييق محلي: العنوان (وضع «اسم الكتاب»).
+    // تضييق محلي: العنوان في وضع «اسم الكتاب»، واسم المؤلف في وضع «المؤلف» بلا معرّف رقمي.
     if (mode === "title" && query) {
       items = items.filter((item) => fieldMatches(item.title, query));
       notice.client("تضييق العنوان على نتائج المصدر");
     }
-    // تضييق محلي: اسم المؤلف (وضع «المؤلف» بلا معرّف رقمي).
     if (mode === "author" && authorText && !authorId) {
       items = items.filter((item) => fieldMatches(item.author, authorText));
       notice.client("تضييق اسم المؤلف على نتائج المصدر");

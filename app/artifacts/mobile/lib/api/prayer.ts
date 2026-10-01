@@ -1,7 +1,4 @@
-/**
- * Prayer times — direct calls to api.aladhan.com/v1 (auth-free), method 3
- * (Muslim World League). Normalization ported from the server's prayer route.
- */
+/** Prayer times — api.aladhan.com/v1 بلا مصادقة، method 3 (Muslim World League). */
 
 import { fetchJson, isJsonRecord, type JsonRecord } from "./http";
 import type { PrayerTimesResult } from "./types";

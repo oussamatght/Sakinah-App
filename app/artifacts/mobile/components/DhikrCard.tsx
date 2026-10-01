@@ -8,11 +8,8 @@ import type { Dhikr } from "@/lib/api/types";
 import { useSettings } from "@/hooks/useAppState";
 
 /**
- * بطاقة ذكر في قائمة الأذكار.
- *
- * تعرض ما في المصدر فقط: النصّ، والتكرار الحقيقي (count_description)،
- * والفضل إن كان موجودًا (فارغ في 15 من 34 فلا يظهر)، وشارة التصنيف
- * المشتقّة من `type`. ولا تُظهر تخريجًا ولا درجة ولا إسنادًا مخترعًا.
+ * بطاقة ذكر تعرض ما في المصدر فقط: النصّ والتكرار الحقيقي والفضل إن وُجد
+ * (فارغ في ١٥ من ٣٤ فلا يظهر) وشارة `type` — بلا تخريج ولا درجة ولا إسناد مخترع.
  */
 
 const CONTENT_LINES = 4;
@@ -40,9 +37,8 @@ export function DhikrCard({
   const done = started && counted >= target;
 
   /**
-   * البنية عمدًا: View خارجي + زرّان شقيقان (الجسم والقلب)، لا زرّ داخل زرّ.
-   * كان Card كلّه Pressable وفيه Pressender القلب، فيخرج HTML غير صالح
-   * (<button> داخل <button>) ويطلق خطأ hydration على الويب.
+   * زرّان شقيقان (الجسم والقلب) لا زرّ داخل زرّ: كان Card كلّه Pressable وفيه
+   * قلبٌ Pressable، فيخرج <button> داخل <button> ويطلق خطأ hydration على الويب.
    */
   return (
     <View
@@ -155,7 +151,6 @@ const styles = StyleSheet.create({
   },
   badgeText: { fontSize: typography.caption, fontWeight: "700" },
   favorite: { padding: 4 },
-  /** الجسم القابل للضغط (شقيق زر القلب، لاابن داخله). */
   body: { marginTop: spacing.xs },
   content: {
     fontWeight: "500",

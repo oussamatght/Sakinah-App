@@ -1,16 +1,8 @@
 /**
- * React Query hooks replacing the generated @workspace/api-client-react ones.
- *
- * Hook names/signatures intentionally mirror the generated client so screens
- * swap the import path and keep working. staleTime strategy:
- *
- *   - Quran text (surahs/surah/tafsir) : Infinity — immutable scripture,
- *     cached for the app's lifetime. This is also the foundation for offline
- *     mode later (react-query persists the cache; only persistence wiring
- *     remains to be added).
- *   - audio                            : 12h (URLs can rotate)
- *   - hadith lists                     : 1h  — categories 24h
- *   - prayer times                     : 1h
+ * React Query hooks replacing the generated @workspace/api-client-react ones;
+ * names/signatures mirror it so screens only swap the import path.
+ * staleTime: Quran text Infinity (immutable scripture, also the basis for
+ * offline mode later), audio 12h (URLs rotate), hadith/prayer 1h, categories 24h.
  */
 
 import { useEffect } from "react";
@@ -77,16 +69,13 @@ import type {
 const HOUR = 60 * 60 * 1000;
 const HALF_DAY = 12 * HOUR;
 const DAY = 24 * HOUR;
-/** Immutable content — never goes stale; persists in memory for the session. */
 const ETERNITY = Infinity;
 
 export type PrayTimesParams = { latitude: number; longitude: number; date?: string };
 export type HadithsParams = { categoryId?: string; page?: number; perPage?: number };
 
-// ---------------------------------------------------------------------------
-// Quran — stable query keys exported so the search helper (below) and future
-// offline persistence can address the cache directly.
-// ---------------------------------------------------------------------------
+// Quran keys stay stable so the search helper and future offline persistence
+// can address the cache directly.
 
 export const quranKeys = {
   surahs: ["quran", "surahs"] as const,
@@ -104,8 +93,7 @@ export const quranKeys = {
 export function useGetQuranSurahs(): UseQueryResult<QuranChapter[], Error> {
   return useQuery({
     queryKey: quranKeys.surahs,
-    // Offline-first: the local SQLite copy wins once the full download exists;
-    // otherwise we fetch and let the persister cache the list as before.
+    // Offline-first: the local SQLite copy wins once the full download exists; otherwise fetch.
     queryFn: async () => {
       if (isQuranDownloaded()) {
         const local = getLocalChapters();
@@ -149,8 +137,7 @@ export function useGetQuranAudio(
   return useQuery({
     queryKey: quranKeys.audio(surahId, reciterId),
     queryFn: async () => {
-      // محلي أولًا: سطر surah_audio إن وُجد، ويُفضَّل ملف mp3 الحقيقي عليه
-      // (تشغيل فعلًا بدون إنترنت). غير موجود → جلب ثم رقن كذاكرة مؤقتة.
+      // محلي أولًا: ملف mp3 الحقيقي (تشغيل بلا إنترنت)، وإلا جلب ثم خزّن كذاكرة مؤقتة.
       const local = getLocalSurahAudio(surahId, reciterId);
       if (local) {
         const fileUri = getQuranAudioLocalUri(surahId, reciterId);
@@ -167,7 +154,6 @@ export function useGetQuranAudio(
   });
 }
 
-/** صوت آية واحدة — يُجلب عند الضغط عليها فقط (بلا أي طلب مسبق). */
 export function useGetAyahAudio(
   surahId: number,
   ayahNumber: number | null,
@@ -179,12 +165,7 @@ export function useGetAyahAudio(
     enabled: Boolean(ayahNumber) && surahId >= 1 && surahId <= 114,
     staleTime: HALF_DAY,
     gcTime: DAY,
-    /**
-     * لا إعادة محاولة عند انقطاع الشبكة: صوت الآية يُطلب بالضغط على الآية، فتصير
-     * 3 محاولات × عدة آيات = طلبات مطروحة بلا فائدة + استثناءات مرفوضة.
-     * مع `retry: 0` ينتقل الاستعلام لحالة الخطأ فورًا ويعرض المستخدم رسالة
-     * واضحة بدل "Uncaught (in promise)".
-     */
+    // بلا إعادة محاولة عند انقطاع الشبكة: الطلب بالضغط على الآية، فالمحاولات المتعددة بلا فائدة وتُنتج استثناءات مرفوضة بدل حالة خطأ واضحة.
     retry: (failureCount, error) => {
       if (error instanceof UpstreamError && error.offline) return false;
       return failureCount < 1;
@@ -201,8 +182,7 @@ export function useGetQuranTafsir(
     options?.query?.enabled ?? (surahId >= 1 && surahId <= 114);
   return useQuery({
     queryKey: quranKeys.tafsir(surahId, ayahNumber),
-    // Cache-aside: every fetched tafsir is stored locally, so after viewing
-    // once it reads offline. Failure never blocks reading (sheet shows retry).
+    // Cache-aside: يُخزَّن كل تفسير محليًا فيُقرأ offline بعد أول مرة، وفشله لا يحجب القراءة.
     queryFn: async () => {
       const local = getLocalTafsir(surahId, ayahNumber);
       if (local) return local;
@@ -237,10 +217,6 @@ export function useGetQuranJuz(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Prayer times
-// ---------------------------------------------------------------------------
-
 export const prayerKeys = {
   times: (latitude: number, longitude: number, date?: string) =>
     ["prayer", latitude, longitude, date ?? null] as const,
@@ -268,14 +244,9 @@ export function useGetPrayerTimes(
   const enabled = options?.query?.enabled ?? true;
   return useQuery({
     queryKey: prayerKeys.times(latitude, longitude, date),
-    // Offline fallback (Task 8): on network failure, return the last cached
-    // result (marked cached: true) instead of an error. On success, cache it.
+    // Offline fallback: عند فشل الشبكة تُعاد آخر نتيجة محفوظة (cached: true) بدل الخطأ، والنجاح يُخزَّن.
     queryFn: async () => {
-      /**
-       * بدون اتصال: نُعيد آخر مواقيت محفوظة فورًا دون انتظار فشل الشبكة
-       * (المهلة 20 ثانية × محاولات إعادة الجلب كانت تُظهر "تعذر التحميل"
-       * على المستخدم رغم وجود كاش صالح). ثم نجلب من الشبكة لو تحسّن الاتصال.
-       */
+      // بلا اتصال: تُعاد آخر مواقيت محفوظة فورًا (مهلة 20 ثانية كانت تُظهر "تعذر التحميل" رغم كاش صالح).
       const nav =
         typeof navigator !== "undefined"
           ? (navigator as Navigator | undefined)
@@ -307,23 +278,6 @@ export function useGetPrayerTimes(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Hadith
-// ---------------------------------------------------------------------------
-
-// Canonical query-key family for hadith:
-//   ["hadith", "categories"]
-//   ["hadith", "category", categoryId, page, perPage]
-//   ["hadith", "detail", hadithId]
-//   ["hadith", "search", phrase]
-//   ["hadith", "book", bookSlug, page, perPage]
-//   ["hadith", "book", bookSlug, "by-number", number]
-//   ["hadith", "book", bookSlug, "section", sectionNumber]
-//   ["hadith", "grade", "book", bookSlug, number]
-//   ["hadith", "grade", "hadeethenc", hadithId]
-// Every page is its own cache entry (per-page queryKeys) — a page change never
-// refetches another page, and `placeholderData: keepPreviousData` keeps the
-// previous page visible while the next one loads.
 export const hadithKeys = {
   categories: ["hadith", "categories"] as const,
   books: ["hadith", "books"] as const,
@@ -343,16 +297,13 @@ export const hadithKeys = {
     ["hadith", "grade", "hadeethenc", hadithId] as const,
 } as const;
 
-/**
- * التخزين offline لا يعرقل إرجاع الاستعلام — يُنفَّذ خارج مسار العرض
- * (microtask) وفشله يُبتلع: التخزين المحلي اختياري.
- */
+/** التخزين offline اختياري: microtask خارج مسار العرض. */
 function persistHadiths(items: HadithItem[]): void {
   queueMicrotask(() => {
     try {
       storeHadiths(items);
     } catch {
-      // اختياري — لا يُسقط العرض.
+      // فشله اختياري — لا يُسقط العرض.
     }
   });
 }
@@ -367,10 +318,7 @@ export function useGetHadithCategories(): UseQueryResult<HadithCategoryNode[], E
   });
 }
 
-/**
- * The nine canonical books (Bukhari, Muslim, …) — for the hadith browser.
- * Book lists are immutable → cache forever; pages cache 1h like lists.
- */
+/** The nine canonical books (Bukhari, Muslim, …) for the hadith browser — immutable, cached forever. */
 export function useGetHadithBooks(): UseQueryResult<HadithBook[], Error> {
   return useQuery({
     queryKey: hadithKeys.books,
@@ -388,16 +336,14 @@ export function useGetBookHadiths(
   const perPage = params?.perPage ?? 10;
   return useQuery({
     queryKey: hadithKeys.bookPage(bookSlug, page, perPage),
-    // Accumulative offline cache: every fetched page is stored to SQLite so
-    // previously-browsed hadiths stay readable offline (Task 7).
+    // Accumulative offline cache: كل صفحة تُخزَّن في SQLite فتبقى المقروءات سابقًا بلا إنترنت.
     queryFn: async () => {
       const result = await fetchBookHadiths(bookSlug, page, perPage);
       persistHadiths(result.items);
       return result;
     },
     enabled: Boolean(params?.bookSlug),
-    // صفحة جديدة → تبقى البيانات السابقة ظاهرة حتى تصل الجديدة (لا شاشة
-    // تحميل كاملة عند كل تنقل) — الحالة: isPending=false، isFetching=true.
+    // صفحة جديدة: تبقى السابقة ظاهرة (isPending=false, isFetching=true) بلا شاشة تحميل كاملة.
     placeholderData: keepPreviousData,
     staleTime: HOUR,
     gcTime: DAY,
@@ -422,10 +368,7 @@ export function useGetHadiths(
   });
 }
 
-/**
- * أحاديث قسم واحد (فهرس الأبواب) — تُجلب لمرة وتُخزن offline. الدرجات تُحمّل
- * كسولًا في البطاقات (useHadithGrade) ولا تُحبس هنا.
- */
+/** أحاديث قسم واحد — تُجلب مرة وتُخزّن offline؛ الدرجات كسولًا عبر useHadithGrade. */
 export function useGetHadithSection(
   bookSlug: string | null,
   sectionNumber: number | null,
@@ -444,9 +387,8 @@ export function useGetHadithSection(
 }
 
 /**
- * البحث النصي الموضوعي (hadeethenc) — مفتاح ["hadith","search",phrase] من
- * العائلة الموثقة. null يعطل الاستعلام (لا طلبات أثناء الكتابة؛ يُفعّل عند
- * submit فقط). النتائج بلا grade من المصدر — القاعدة محفوظة (تُحمّل كسولًا).
+ * البحث الموضوعي (hadeethenc) — null يعطّله فلا طلبات أثناء الكتابة (submit فقط)،
+ * والنتائج بلا grade من المصدر فتُحمَّل كسولًا.
  */
 export function useGetHadithSearch(
   phrase: string | null,
@@ -461,11 +403,9 @@ export function useGetHadithSearch(
 }
 
 /**
- * تفصيل حديث واحد — المسار الوحيد الذي تظهر فيه الدرجة كما أعطاها المصدر.
- * HadeethEnc /hadeeths/one هو المصدر الوحيد الذي يقدم grade/attribution/
- * explanation/reference في التفصيل (مُتحقق حيًا: القوائم والبحث بلا grade).
- * hadis-api-id (الكتب التسعة) لا يوفر endpoint تفصيل أصلًا — تمرر الشاشة
- * hadithId=null فيتعطل الاستعلام (enabled=false) بدل خطأ اتصال مضلل.
+ * تفصيل حديث واحد — المصدر الوحيد الذي يعطي الدرجة/الراوي/الشرح/المرجع في
+ * التفصيل (مُتحقق حيًا: القوائم والبحث بلا grade). hadis-api-id بلا endpoint
+ * تفصيل أصلًا، فـ hadithId=null يعطّل الاستعلام بدل خطأ اتصال مضلل.
  */
 export function useGetHadithDetail(
   hadithId: string | null,
@@ -480,10 +420,8 @@ export function useGetHadithDetail(
 }
 
 /**
- * حديث كتاب واحد برقمه — نفس مسار الإنتاج الذي يبني بطاقات الكتب
- * (hadis-api-id + إثراء fawaz الحرفي). تُستخدمه شاشة التفصيل لفتح حديث
- * من كتاب: الدرجة/النص/المرجع مطابقة تمامًا لبطاقة القائمة — لا مصدر
- * درجات ثانٍ.
+ * حديث كتاب واحد برقمه — نفس مسار بطاقات الكتب (hadis-api-id + إثراء fawaz
+ * الحرفي)، فتطابق الدرجة/النص/المرجع في التفصيل: لا مصدر درجات ثانٍ.
  */
 export function useGetHadithByNumber(
   bookSlug: string | null,
@@ -499,12 +437,9 @@ export function useGetHadithByNumber(
 }
 
 /**
- * الدرجة كسولًا لعنصر قائمة (لا تُحبس القائمة نفسها):
- *   - القديم من stock (fetcher مثرًى مثل by-number/التفصيل) يُعاد كما هو.
- *   - HadeethEnc → نفس مصدر/حقل شاشة التفصيل (fetchHadithDetail).
- *   - hadis-api-id → نفس القاعدة الحرفية (fawaz للكتب الخمسة؛ بخاري/مسلم بلا).
- * البطاقات المرئية فقط (FlatList virtualization) تحرك طلبًا واحدًا لكل حديث،
- * وتُحفظ النتيجة في كاش React Query (persisted) فالعودة فورية.
+ * الدرجة كسولًا لعنصر قائمة (لا تُحبس القائمة): القديم من stock يُعاد كما هو،
+ * HadeethEnc → fetchHadithDetail، hadis-api-id → fawaz الحرفي (خمسة كتب؛
+ * بخاري/مسلم بلا). طلب واحد لكل حديث ظاهر (FlatList) وتُحفظ النتيجة في الكاش.
  */
 export function useHadithGrade(
   item: HadithItem | null | undefined,
@@ -544,11 +479,7 @@ export function useHadithGrade(
   return immediate ?? data;
 }
 
-/**
- * اجلب الصفحة التالية (واحدة فقط) في الخلفية — عند وصول المستخدم إليها
- * تكون مخزنة وطازجة فيظهر العرض فورًا بلا spinner. مستخدمة في شاشات
- * الأحاديث (كتب ومواضيع).
- */
+/** الصفحة التالية في الخلفية: عند وصول المستخدم إليها مخزنة وطازجة بلا spinner. */
 export function usePrefetchNextHadithPage(params: {
   enabled: boolean;
   bookSlug?: string | null;
@@ -582,10 +513,7 @@ export function usePrefetchNextHadithPage(params: {
   }, [enabled, hasMore, page, perPage, bookSlug, categoryId, queryClient]);
 }
 
-/**
- * Chapter → page-range map (from quran.com) powering the juz/page pickers in
- * the Quran tab. Immutable content → cached forever.
- */
+/** Chapter → page-range map (quran.com) لاختياري الأجزاء/الصفحات — غير قابل للتغيير. */
 export function useGetQuranChapterPages(): UseQueryResult<QuranChapterPage[], Error> {
   return useQuery({
     queryKey: ["quran", "chapter-pages"],
@@ -595,11 +523,7 @@ export function useGetQuranChapterPages(): UseQueryResult<QuranChapterPage[], Er
   });
 }
 
-// ---------------------------------------------------------------------------
-// Client-side Quran search (Phase B groundwork) — searches over verses already
-// present in the react-query cache, no network call. Call `useQuranSearch()`
-// from a screen; it de-dupes and scans whatever surahs are loaded so far.
-// ---------------------------------------------------------------------------
+// Quran search client-side — يبحث في آيات كاش React Query المحمّلة بلا طلب شبكة، عبر useQuranSearch().
 
 export type QuranSearchHit = {
   surahId: number;
@@ -612,12 +536,8 @@ export type QuranSearchHit = {
 };
 
 /**
- * Normalizes Uthmani script to plain Arabic for search: strips tashkeel and
- * folds alef-wasla (ٱ) / hamza carriers into plain alef so a user typing
- * "الصمد" matches "ٱلصَّمَدُ".
- *
- * التطبيع نفسه الآن في lib/arabic.ts ويستخدمه بحث الأذكار أيضًا، فصار
- * المؤلف الوحيد واحدًا (كان هنا نسخة خاصة وبحث المصحف يختلف عن غيره).
+ * تطبيع الرسم العثماني لبحث عادي: يحذف التشكيل ويوحّد أنواع الألف، فتكتب
+ * "الصمد" فتطابق "ٱلصَّمَدُ". التطبيع صار في lib/arabic.ts (كان هنا نسخة خاصة).
  */
 function normalizeForSearch(text: string): string {
   return normalizeArabic(text);
@@ -630,16 +550,11 @@ export function useQuranSearch(): (query: string) => QuranSearchHit[] {
 function searchQuranInMemory(query: string): QuranSearchHit[] {
   const needle = query.trim();
   if (needle.length < 2) return [];
-  // Lazy import dance avoided: queryClient lives in the app module. Screens
-  // pass loaded surahs directly instead — see searchQuranVerses().
+  // تفادي استيراد queryClient: الشاشات تمرّر السور المحمّلة إلى searchQuranVerses().
   return [];
 }
 
-/**
- * Pure function usable from any screen: pass the surahs you already have in
- * memory (e.g. from useQueries over quranKeys.surah(id)) and get scored hits.
- * Kept dependency-free so it can also run against an offline store later.
- */
+/** دالة نقية: مرّر السور المحمّلة في الذاكرة لتحصل على نتائج مرتّبة، بلا تبعيات لتعمل لاحقًا على مخزن offline. */
 export function searchQuranVerses(
   surahs: QuranSurah[],
   query: string,
@@ -680,11 +595,7 @@ export function searchQuranVerses(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Next-prayer countdown (Phase A groundwork for expo-notifications): pure
-// function over a timings record; returns minutes until the next prayer and
-// its key, or null when all prayers for today have passed.
-// ---------------------------------------------------------------------------
+// Next-prayer countdown (groundwork for expo-notifications): minutes left and the next prayer's key, or null.
 
 export type NextPrayerInfo = {
   key: string;

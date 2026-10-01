@@ -4,23 +4,12 @@ import type { PrayerTimesResult } from "@/lib/api/types";
 /**
  * إشعار الأذان (Task 10) — جدولة إشعار محلي فوقت كل صلاة بصوت أذان حقيقي.
  *
- * ⚠️ Expo Go guard (إصلاح كراش الإقلاع):
- * من SDK 53 صعودًا، **استيراد expo-notifications نفسه يرمي خطأ** داخل Expo Go
- * على أندرويد (وحدة الإشعارات أزيلت من Expo Go). لذلك:
- *   1. لا يوجد import ساكن هنا — الوحدة تُحمَّل كسولًا داخل try/catch
- *      (lazy require) فقط عندما نحتاجها فعلاً.
- *   2. isExpoGo() تكتشف بيئة Expo Go عبر Constants 1 و 2 (كما توصي Expo)،
- *      وكل الدوال العامة تعود بأمان إن كنا داخل Expo Go.
- *   3. بذلك لا يسقط تحميل settings.tsx أو _layout.tsx — وهو ما كان يسبب
- *      "missing the required default export" و"Cannot read property
- *      'ErrorBoundary' of undefined" معًا.
- *
- * في development build حقيقي (npx eas build --profile development) كل شيء
- * يعمل: القناة المخصصة "adhan" بأولوية MAX + صوت الأذان res/raw.
- *
- * صوت الأذان:
- *  - Android: android/app/src/main/res/raw/adhan_short.mp3 (بعد prebuild).
- *  - iOS: assets/sounds/adhan_short.wav داخل بندل التطبيق.
+ * حارس Expo Go: من SDK 53 استيراد expo-notifications نفسه يرمي خطأ داخل Expo Go
+ * على أندرويد (أُزيلت منه وحدة الإشعارات) فيسقط تحميل settings.tsx و_layout.tsx
+ * بسبب "missing the required default export". لذلك لا استيراد ساكن هنا: الوحدة
+ * تُحمَّل كسولًا داخل try/catch، وisExpoGo() تكشف البيئة عبر Constants فتسلم كل
+ * الدوال العامة بأمان. في بناء development حقيقي يعمل كل شيء: القناة "adhan"
+ * بأولوية MAX + صوت الأذان (res/raw بعد prebuild على أندرويد، sounds على iOS).
  */
 
 export const ADHAN_CHANNEL_ID = "adhan";
@@ -29,10 +18,10 @@ type NotificationsModule = typeof import("expo-notifications");
 
 let cachedModule: NotificationsModule | null | undefined;
 
-/** كشف بيئة Expo Go (الطريقة الرسمية الموثقة من Expo). */
+/** كشف بيئة Expo Go بالطريقة الرسمية الموثقة من Expo. */
 export function isExpoGo(): boolean {
   try {
-    // require هنا مقصود: تجنب أي استيراد ساكن لexpo-constants في مسار التقييم.
+    // require مقصود: تفادي أي استيراد ساكن في مسار التقييم.
     const Constants = require("expo-constants") as {
       executionEnvironment?: number;
       ExecutionEnvironment?: { Bare?: number; StoreClient?: number };
@@ -46,10 +35,8 @@ export function isExpoGo(): boolean {
   }
 }
 
-/**
- * تحميل expo-notifications بأمان — يعيد null داخل Expo Go أو عند فشل الوحدة
- * (النداءات الخطأ يظهر مرة واحدة كتحذير مكتوم وليس كراش تطبيق).
- */
+/** تحميل expo-notifications بأمان: null داخل Expo Go أو عند فشل الوحدة
+ *  (النداء الخطأ يظهر كتحذير مكتوم لا كراش تطبيق). */
 function getNotifications(): NotificationsModule | null {
   if (cachedModule !== undefined) return cachedModule;
   if (isExpoGo()) {
@@ -59,7 +46,7 @@ function getNotifications(): NotificationsModule | null {
   try {
     cachedModule = require("expo-notifications") as NotificationsModule;
   } catch {
-    // وحدة غير متاحة (Expo Go / بناء بلا إشعارات) — تعطيل هادئ للميزة.
+    // وحدة غير متاحة (بناء بلا إشعارات) — تعطيل هادئ للميزة.
     cachedModule = null;
   }
   return cachedModule;
@@ -90,7 +77,6 @@ export function configureNotificationHandler(): void {
   }
 }
 
-/** إنشاء قناة "adhan" بأولوية MAX وصوت الأذان (أندرويد فقط). */
 export async function ensureAdhanChannel(): Promise<boolean> {
   const Notifications = getNotifications();
   if (!Notifications || Platform.OS !== "android") return Boolean(Notifications);
@@ -98,7 +84,7 @@ export async function ensureAdhanChannel(): Promise<boolean> {
     await Notifications.setNotificationChannelAsync(ADHAN_CHANNEL_ID, {
       name: "الأذان",
       importance: Notifications.AndroidImportance.MAX,
-      sound: "adhan_short.mp3", // res/raw/adhan_short.mp3
+      sound: "adhan_short.mp3",
       lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
       vibrationPattern: [0, 500, 250, 500],
       enableVibrate: true,
@@ -118,10 +104,8 @@ function parseTimeToClock(time: string): { hour: number; minute: number } | null
   return { hour, minute };
 }
 
-/**
- * إعادة جدولة الإشعارات الخمسة لليوم الحالي (تُستدعى عند كل فتح للتطبيق —
- * المواقيت تتغير يوميًا بضع دقائق). تحذف القديمة أولًا ثم تجدول الجديدة.
- */
+/** إعادة جدولة إشعارات اليوم عند كل فتح (المواقيت تتغيّر يوميًا)،
+ *  بتحذف القديمة أولًا ثم تجدول الجديدة. */
 export async function scheduleAdhanNotifications(
   prayerTimes: PrayerTimesResult,
 ): Promise<{ scheduled: number; reason?: string }> {
@@ -138,7 +122,6 @@ export async function scheduleAdhanNotifications(
   }
 
   try {
-    // إلغاء القديم ثم جدولة الجديد.
     const pending = await Notifications.getAllScheduledNotificationsAsync();
     for (const notification of pending) {
       if (notification.content.data?.kind === "adhan") {
@@ -146,7 +129,7 @@ export async function scheduleAdhanNotifications(
       }
     }
   } catch {
-    // إن فشل الإلغاء نكمل — الجدولة الجديدة تبقى أفضل من لا شيء.
+    // فشل الإلغاء لا يوقف الجدولة الجديدة.
   }
 
   let scheduled = 0;
@@ -154,7 +137,7 @@ export async function scheduleAdhanNotifications(
   for (const prayer of PRAYER_ROWS) {
     const clock = parseTimeToClock(prayerTimes.timings[prayer.key] ?? "");
     if (!clock) continue;
-    // لا تجدول صلاة مضى وقتها اليوم.
+    // صلاة وقتها اليوم مضى ⇒ لا تُجدول.
     const when = new Date();
     when.setHours(clock.hour, clock.minute, 0, 0);
     if (when <= now) continue;
@@ -183,7 +166,7 @@ export async function scheduleAdhanNotifications(
       });
       scheduled += 1;
     } catch {
-      // تجاهل الفردية — نكمل جدولة بقية الصلوات.
+      // فشل فردي لا يوقف جدولة بقية الصلوات.
     }
   }
   return {
@@ -192,7 +175,6 @@ export async function scheduleAdhanNotifications(
   };
 }
 
-/** إلغاء كل إشعارات الأذان (لما يطفئ المستخدم التنبيهات من الإعدادات). */
 export async function cancelAdhanNotifications(): Promise<void> {
   const Notifications = getNotifications();
   if (!Notifications) return;
@@ -208,10 +190,8 @@ export async function cancelAdhanNotifications(): Promise<void> {
   }
 }
 
-/**
- * "تجربة صوت الأذان" من الإعدادات — إشعار فوري بعد ثانيتين بنفس القناة
- * والصوت، ليتأكد المستخدم أن الصوت يعمل دون انتظار وقت صلاة.
- */
+/** "تجربة صوت الأذان" من الإعدادات — إشعار فوري بنفس القناة والصوت
+ *  ليتأكد المستخدم أن الصوت يعمل دون انتظار وقت صلاة. */
 export async function playAdhanTestNotification(): Promise<boolean> {
   const Notifications = getNotifications();
   if (!Notifications) return false;

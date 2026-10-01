@@ -14,11 +14,8 @@ import { radii, spacing, typography } from '@/constants/tokens';
 import { useColors } from '@/hooks/useColors';
 import { useSettings } from '@/hooks/useAppState';
 
-/**
- * Juz reader — the real content of one juz (alquran.cloud /juz/{n}): a header
- * listing each surah's ayah range inside the juz, then the continuous verses
- * in mushaf order. Tapping a range jumps into the full surah reader.
- */
+/** Juz reader — the real content of one juz (alquran.cloud /juz/{n}): a header
+ *  listing each surah's ayah range, then the verses in mushaf order. */
 export default function JuzReader() {
   const colors = useColors();
   const router = useRouter();

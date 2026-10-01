@@ -1,23 +1,15 @@
 /**
- * مزوّد إسلام هاوس (API v3) — المسارات كلها مُتحقّق منها حيًا:
- *   /main/books/ar/ar/{page}/{limit}/json        قائمة كتب عامة (links.total_items)
- *   /main/get-item/{id}/ar/json                  تفاصيل عنصر (مرفقات، مؤلفون، غلاف)
- *   /main/get-author/{id}/ar/json                مؤلف/مصدر (سيرة، عدد عناصره)
- *   /main/get-author-items/{id}/showall/ar/ar/{page}/{limit}/json  كتب المؤلف
- *   /categories/showall/ar/json                  شجرة فارغة المعرّفات (id غير صالح
- *                                               ل_get-category-items_)
- *   /categories/viewcat/{source_id}/ar/showall/json  أبناء عقدة معرّفاتهم صالحة
+ * مزوّد إسلام هاوس (API v3) — المسارات مُتحقّق منها حيًا:
+ *   /main/books/ar/ar/{page}/{limit}/json (قائمة، links.total_items) ·
+ *   /main/get-item/{id}/ar/json (مرفقات ومؤلفون وغلاف) ·
+ *   /main/get-author/{id}/ar/json (سيرة وعدد عناصره) ·
+ *   /main/get-author-items/{id}/showall/ar/ar/{page}/{limit}/json (كتب المؤلف) ·
+ *   /categories/showall/ar/json (معرّفات **غير صالحة** ل get-category-items) ·
+ *   /categories/viewcat/{source_id}/ar/showall/json (أبناء بمعرّفات صالحة) ·
  *   /main/get-category-items/{validId}/showall/ar/ar/{page}/{limit}/json
- *
- * «البحث النصي» غير موجود في إصدار API هذا (مُتحقّق: /main/search = 404)،
- * ولا يوجد بحث بالعنوان ولا lookup باسم المؤلف. لذلك:
- *  - التصنيف والمؤلف(id)  → فلترة **على الخادم**.
- *  - أي نص → تصفية محلية **محدودة** على ما أعناه المصدر، تُعلن للمستخدم.
- *
- * ملاحظة مهمّة تحقّقت منها حيًا: معرّفات /categories/showall ليست في فضاء
- * المعرّفات نفسه معرّفات viewcat، وأي معرّف من showall يُرجع «لا عناصر» دائمًا
- * عند get-category-items. الفروع الحقيقية (١٦ فرعًا) تأتي من viewcat الخاص
- * بجذر الشجرة، وهي التي نستخدمها للتصفح.
+ * لا بحث نصي (متحقّق: ‎/main/search = 404) ولا بالعنوان ولا lookup بالمؤلف؛ فالتصنيف
+ * والمؤلف(id) فلترة **على الخادم** وأي نص تصفية محلية **محدودة** تُعلن. ومتحقَّق حيًّا:
+ * الفروع الحقيقية (١٦) من viewcat الخاص بالجذر لا من showall (معرّفاته «لا عناصر»).
  */
 
 import {
@@ -113,6 +105,8 @@ function normalizeItem(raw: IhItemRaw): IslamicBook | null {
     attachments: attachmentList.length > 0 ? attachmentList : undefined,
     itemType: str(raw.type),
     language: str(raw.translated_language) ?? str(raw.source_language),
+    // إسلام هاوس لا يوفّر نقطة نهاية نصّ إطلاقًا: القراءة عبر PDF فقط.
+    readability: "pdf-only",
   };
 }
 
@@ -162,10 +156,7 @@ export class IslamHouseBooksProvider implements IslamicBooksProvider {
     return this.categoriesPromise;
   }
 
-  /**
-   * الفروع الحقيقية من viewcat الخاص بجذر الشجرة — معرّفاتها الصالحة
-   * ل get-category-items. طلب واحد، مُخزَّن.
-   */
+  /** الفروع الحقيقية من viewcat الخاص بجذر الشجرة — معرّفاتها الصالحة لـ get-category-items؛ طلب واحد مُخزَّن. */
   async getCategoryBranches(): Promise<IslamicBookCategory[]> {
     if (!this.branchesPromise) {
       this.branchesPromise = (async () => {
@@ -185,7 +176,6 @@ export class IslamHouseBooksProvider implements IslamicBooksProvider {
     return this.branchesPromise;
   }
 
-  /** أبناء فرع بعينه — يُجلب عند الطلب فقط (لا نحمّل ٤٨٩٩ عقدة). */
   async getCategoryChildren(nodeId: string): Promise<IslamicBookCategory[]> {
     const id = str(nodeId);
     if (!id) return [];
@@ -395,13 +385,8 @@ export class IslamHouseBooksProvider implements IslamicBooksProvider {
     return { items, page: safePageNumber, perPage: limit, total, hasMore };
   }
 
-  /**
-   * البحث الموحّد — بصدق تام:
-   *  - تصنيف أو مؤلف(id) بلا نص → **كله على الخادم** (get-category-items /
-   *    get-author-items) بترقيم حقيقي.
-   *  - أي نص → لا endpoint نصي (404 مُتحقَّق) ⇒ تصفية محلية على عدد محدود من
-   *    الصفحات التي أعناها المصدر، مع إعلان الحدّ للمستخدم.
-   */
+  /** تصنيف أو مؤلف(id) بلا نص → **كله على الخادم** (get-category-items/get-author-items)؛ وأي نص ⇒ لا
+   * endpoint نصي (404 مُتحقَّق) فتصفية محلية على عدد محدود من الصفحات تُعلن للمستخدم. */
   async searchWithFilters(
     filters: BookSearchFilters & { page?: number; perPage?: number },
   ): Promise<IslamicBookSearchResult> {
@@ -485,7 +470,7 @@ export class IslamHouseBooksProvider implements IslamicBooksProvider {
       };
     }
 
-    // لا نص ولا تصنيف ولا مؤلف → تصفية محلية على أول ١٥٠ كتابًا فقط.
+    // تصفية نصية محلية على أول ١٥٠ كتابًا فقط (لا endpoint نصي عند إسلام هاوس).
     const scanned: IslamicBook[] = [];
     for (let current = 1; current <= MAX_SEARCH_SCAN_PAGES; current += 1) {
       const batch = await this.fetchGlobalBooks(current, SEARCH_SCAN_PAGE_SIZE);

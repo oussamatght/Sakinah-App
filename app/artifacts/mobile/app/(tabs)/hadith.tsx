@@ -42,41 +42,21 @@ import { ItemGrade } from "@/components/GradeBadge";
 import { radii, spacing, typography } from "@/constants/tokens";
 import { useColors } from "@/hooks/useColors";
 
-/**
- * Entry mode:
- * canonical books or thematic categories.
- */
 type Mode = "books" | "topics";
 
-/**
- * نوع البحث داخل كتاب:
- * نص موضوعي أو رقم حديث.
- */
 type SearchKind = "text" | "number";
 
-/**
- * إصلاح التداخل مع الـ Tab Bar.
- */
+/** إصلاح التداخل مع الـ Tab Bar. */
 const TAB_BAR_HEIGHT = 84;
 
-/**
- * تحويل الأرقام الإنجليزية إلى عربية.
- */
 function toArabicDigits(value: number | string): string {
   return String(value).replace(/[0-9]/g, (d) => "٠١٢٣٤٥٦٧٨٩"[Number(d)]);
 }
 
 /**
- * بطاقة حديث واحدة.
- *
- * showMissingGrade:
- * - true  => تظهر درجة الحديث حتى لو كانت غير متوفرة.
- * - false => لا تظهر "درجة الحديث غير متوفرة".
- *
- * في المواضيع نمرر false حتى لا تظهر الرسالة.
- *
- * bookSlug: ضروري لحديث من الكتب (hadis-api-id) لتحميل درجته كسولًا
- * (useHadithGrade) من fawaz — تُترك undefined لمواضيع HadeethEnc.
+ * بطاقة حديث واحدة. showMissingGrade=true تُظهر الدرجة حتى غير المتوفرة وfalse تُخفي
+ * الرسالة (للمواضيع). bookSlug يلزم لأحاديث hadis-api-id لتحميل الدرجة كسولًا من
+ * fawaz، ويبقى undefined لمواضيع HadeethEnc.
  */
 function HadithCard({
   item,
@@ -123,8 +103,7 @@ function HadithCard({
       </View>
 
       <View style={styles.hadithMetaRow}>
-        {/* الدرجة تُحمّل كسولًا: لا تُحبس القائمة، المصدر/الحقل كما هو،
-            بلا أي اختراع (البادج "غير متوفرة" حسب showMissingGrade). */}
+        {/* الدرجة كسولًا حتى لا تُحبس القائمة، وقيمتها من المصدر بلا اختراع. */}
         <ItemGrade item={item} bookSlug={bookSlug} showMissing={showMissingGrade} />
 
         {item.attribution ? (
@@ -155,15 +134,7 @@ function HadithCard({
   );
 }
 
-/**
- * تبويب الأحاديث:
- *
- * - الكتب:
- *   فهرس أبواب + درجات + الراوي + صفحات.
- *
- * - المواضيع:
- *   تصنيف موضوعي + البحث + offline.
- */
+/** تبويب الأحاديث: الكتب (فهرس أبواب + درجات + صفحات) أو المواضيع (بحث + offline). */
 export default function HadithTab() {
   const colors = useColors();
   const router = useRouter();
@@ -182,42 +153,26 @@ export default function HadithTab() {
 
   const [page, setPage] = useState(1);
 
-  /**
-   * فهرس الأبواب.
-   */
+  /** فهرس الأبواب المفتوح، أو null للقائمة العادية. */
   const [openSection, setOpenSection] = useState<HadithBookSection | null>(
     null,
   );
 
   const [indexVisible, setIndexVisible] = useState(false);
 
-  /**
-   * البحث.
-   */
   const [searchText, setSearchText] = useState("");
 
   const [submittedText, setSubmittedText] = useState("");
 
   const [searchKind, setSearchKind] = useState<SearchKind>("text");
 
-  /**
-   * نتيجة البحث بالرقم:
-   * undefined = جارٍ
-   * null = لا يوجد
-   * HadithItem = موجود
-   */
+  /** نتيجة البحث بالرقم: undefined جارٍ، null لا يوجد، HadithItem موجود. */
   const [numberResult, setNumberResult] = useState<
     HadithItem | null | undefined
   >(undefined);
 
-  /**
-   * قائمة المزيد.
-   */
   const [moreVisible, setMoreVisible] = useState(false);
 
-  /**
-   * جلب أحاديث الكتاب.
-   */
   const listQuery = useGetBookHadiths(
     mode === "books" && selectedBook && !openSection && !submittedText
       ? {
@@ -228,9 +183,6 @@ export default function HadithTab() {
       : null,
   );
 
-  /**
-   * جلب أحاديث الموضوع.
-   */
   const topicQuery = useGetHadiths(
     mode === "topics" && selectedCategory && !submittedText
       ? {
@@ -247,9 +199,6 @@ export default function HadithTab() {
     },
   );
 
-  /**
-   * البحث النصي.
-   */
   const searchQuery = useGetHadithSearch(
     submittedText.trim().length >= 2 && searchKind === "text"
       ? submittedText.trim()
@@ -268,10 +217,7 @@ export default function HadithTab() {
 
   const activeList = mode === "books" ? listQuery : topicQuery;
 
-  /**
-   * اجلب الصفحة التالية وحدها في الخلفية (عند وجودها): وعند الضغط على
-   * "التالي" تكون مخزنة وطازجة فتُعرض فورًا بلا طلب/دوران.
-   */
+  /** مسبق جلب الصفحة التالية في الخلفية حتى يفتح "التالي" فورًا بلا انتظار. */
   usePrefetchNextHadithPage({
     enabled:
       Boolean(selectedBook || selectedCategory) &&
@@ -284,9 +230,6 @@ export default function HadithTab() {
     hasMore: activeList.data?.hasMore ?? false,
   });
 
-  /**
-   * البحث بالرقم داخل الكتاب.
-   */
   useEffect(() => {
     if (searchKind !== "number" || submittedText.trim() === "") {
       return;
@@ -320,9 +263,6 @@ export default function HadithTab() {
     };
   }, [searchKind, selectedBook, submittedText]);
 
-  /**
-   * نتائج البحث المحلي offline.
-   */
   const offlineHits = useMemo(() => {
     if (searchKind !== "text") {
       return [];
@@ -343,9 +283,6 @@ export default function HadithTab() {
     }
   }, [searchKind, submittedText]);
 
-  /**
-   * العودة للقائمة الرئيسية.
-   */
   const backToList = () => {
     setSelectedBook(null);
     setSelectedCategory(null);
@@ -355,9 +292,6 @@ export default function HadithTab() {
     setMoreVisible(false);
   };
 
-  /**
-   * مسح البحث.
-   */
   const clearSearch = () => {
     setSearchText("");
     setSubmittedText("");
@@ -365,19 +299,12 @@ export default function HadithTab() {
     setPage(1);
   };
 
-  /**
-   * عنوان الشاشة.
-   */
   const headerTitle =
     mode === "books"
       ? (currentBook?.nameAr ?? "الأحاديث")
       : (categories.find((category) => category.id === selectedCategory)
           ?.titleAr ?? "المواضيع");
 
-  /**
-   * القائمة الرئيسية:
-   * الكتب / المواضيع.
-   */
   if (!selectedBook && !selectedCategory) {
     return (
       <Screen scroll={false}>
@@ -623,9 +550,6 @@ export default function HadithTab() {
     );
   }
 
-  /**
-   * الأحاديث الحالية.
-   */
   const items = activeList.data?.items ?? [];
 
   const reportedTotal = Number(activeList.data?.total ?? 0);
@@ -641,11 +565,8 @@ export default function HadithTab() {
     ),
   );
 
-  /**
-   * لا نفترض أن الـAPI يعيد totalPages دائمًا.
-   * إذا كانت الصفحة الحالية ممتلئة بـperPage عناصر، نسمح بالانتقال
-   * للصفحة التالية حتى لو كانت metadata القديمة ناقصة.
-   */
+  /** الـAPI لا يضمن totalPages؛ إن نقصت نحسبها من total/perPage أو نسمح بالصفحة
+   *  التالية متى امتلأت الحالية بـperPage عناصر. */
   const totalPages =
     reportedTotalPages > 0
       ? reportedTotalPages
@@ -691,9 +612,6 @@ export default function HadithTab() {
         ? "البحث النصي: كل الأحاديث موضوعيًا (موسوعة الأحاديث)"
         : `البحث: ${headerTitle} + المحتوى المخزّن offline`;
 
-  /**
-   * نتيجة البحث بالرقم.
-   */
   const numberResultView =
     numberResult === undefined ? (
       <LoadingState />
@@ -729,19 +647,13 @@ export default function HadithTab() {
       />
     );
 
-  /**
-   * Toggle الفهرس.
-   */
   const toggleIndex = () => {
     setIndexVisible((visible) => !visible);
     setOpenSection(null);
     setMoreVisible(false);
   };
 
-  /**
-   * شريط pagination ثابت وواضح.
-   * وضعه أعلى وأسفل القائمة يمنع اختفاء زر "التالي" بعد آخر حديث.
-   */
+  /** شريط pagination مثبت أعلى وأسفل القائمة حتى لا يختفي زر "التالي" بعد آخر حديث. */
   const renderPager = () => (
     <View style={styles.pager}>
       <Pressable
@@ -888,7 +800,6 @@ export default function HadithTab() {
             </Text>
           </Pressable>
         ) : null}
-        /** * زر المزيد. */
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="المزيد من الخيارات"
@@ -907,7 +818,6 @@ export default function HadithTab() {
           />
         </Pressable>
       </View>
-      /** * قائمة المزيد. */
       {moreVisible ? (
         <View
           style={[
@@ -999,7 +909,6 @@ export default function HadithTab() {
           </Pressable>
         </View>
       ) : null}
-      /** * شريط البحث. */
       <View style={styles.searchWrap}>
         <View
           style={[
@@ -1077,7 +986,6 @@ export default function HadithTab() {
           {searchScopeNote}
         </Text>
       </View>
-      /** * فهرس الأبواب. */
       {indexVisible && !openSection ? (
         <FlatList
           data={sections}
@@ -1143,20 +1051,9 @@ export default function HadithTab() {
           )}
         />
       ) : searchNumberActive ? (
-        /**
-         * نتيجة البحث بالرقم.
-         */
         numberResultView
       ) : searchTextActive ? (
-        /**
-         * نتائج البحث النصي للمواضيع.
-         *
-         * مهم:
-         * showMissingGrade={false}
-         *
-         * لذلك لن تظهر:
-         * "درجة الحديث غير متوفرة"
-         */
+        /** نتائج البحث النصي: showMissingGrade={false} فلا تظهر رسالة الدرجة غير المتوفرة. */
         <FlatList
           data={[...(searchQuery.data?.items ?? []), ...offlineHits]}
           keyExtractor={(item, index) => `search-${item.id}-${index}`}
@@ -1232,9 +1129,6 @@ export default function HadithTab() {
           }
         />
       ) : openSection ? (
-        /**
-         * أحاديث الباب.
-         */
         <FlatList
           data={openSection.hadiths}
           keyExtractor={(hadith) => `sec-hadith-${hadith}`}
@@ -1280,9 +1174,6 @@ export default function HadithTab() {
           )}
         />
       ) : (
-        /**
-         * القائمة العادية بالصفحات.
-         */
         <>
           {activeList.isPending ? <LoadingState /> : null}
 
@@ -1325,15 +1216,7 @@ export default function HadithTab() {
                         : undefined
                   }
                   colors={colors}
-                  /**
-                   * هنا أهم إصلاح:
-                   *
-                   * الكتب:
-                   * showMissingGrade = true
-                   *
-                   * المواضيع:
-                   * showMissingGrade = false
-                   */
+                  /** أهم إصلاح: المواضيع تمرّر false حتى لا تظهر رسالة الدرجة غير المتوفرة. */
                   showMissingGrade={mode === "books"}
                 />
               )}
@@ -1367,11 +1250,8 @@ export default function HadithTab() {
   );
 }
 
-/**
- * صف حديث واحد داخل باب مفتوح — يُجلب عبر useGetHadithByNumber (مخزَّن في
- * React Query: البطاقة وشاشة التفصيل تشاركان نفس الكاش، والصفوف المرئية فقط
- * تُنشّط بفضل FlatList virtualization).
- */
+/** صف حديث داخل باب مفتوح عبر useGetHadithByNumber: كاش React Query مشترك مع شاشة
+ *  التفصيل، فلا تُنشَّط إلا الصفوف المرئية (virtualization). */
 function SectionHadithRow({
   bookSlug,
   hadithNumber,
@@ -1504,9 +1384,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  /**
-   * زر المزيد.
-   */
   moreButton: {
     alignItems: "center",
     borderRadius: radii.pill,
@@ -1692,9 +1569,6 @@ const styles = StyleSheet.create({
     textAlign: "right",
   },
 
-  /**
-   * Pagination.
-   */
   refreshingText: {
     fontSize: typography.caption,
     marginBottom: spacing.xs,
@@ -1723,9 +1597,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  /**
-   * رقم الصفحة الحالية.
-   */
   pageIndicator: {
     alignItems: "center",
     borderRadius: radii.pill,
@@ -1741,9 +1612,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  /**
-   * السهم الجديد للانتقال للصفحة التالية.
-   */
   nextPageArrow: {
     alignItems: "center",
     borderRadius: radii.pill,

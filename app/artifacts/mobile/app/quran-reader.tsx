@@ -60,7 +60,6 @@ function toArabicDigits(value: number): string {
 const MUSHAF_BASE = Math.round(typography.quranLarge * 1.15);
 /** اسم عائلة الخط كما سُجل في useFonts (مفتاح التحميل نفسه). */
 const MUSHAF_FONT = 'AmiriQuran_400Regular';
-/** لون ذهبي هادئ لعلامة نهاية الآية. */
 const MARKER_GOLD = '#B8860B';
 
 /** وضع التلاوة: آية واحدة فقط، أو متتابع حتى آخر السورة، أو السورة كاملة (ملف واحد). */
@@ -71,18 +70,11 @@ type ReadingItem =
   | { key: string; type: 'verse'; verse: QuranVerse };
 
 /**
- * قارئ المصحف المستمر:
- *  - سورة واحدة = صفحة قراءة واحدة متصلة: كل آياتها 1..N في قائمة رأسية واحدة
- *    (FlatList) بلا تقليب صفحات أفقي وبلا صور صفحات إطلاقًا.
- *  - النص حرفيًا من المصدر (quran-uthmani)؛ الرقم القانوني سورة:آية هو مفتاح
- *    التلاوة والتنقّل والحفظ، والفواصل بين صفحات المصحف للعرض فقط.
- *  - الصوت: آية محددة عند النقر، أو متتابع (استئناف تلقائي إلى آخر السورة)
- *    مع مسبق تحميل الآية التالية؛ السورة الحالية هي الوحيدة المعروضة فلا يُقفز
- *    بين السور تلقائيًا، ولا تتسرّب آيات سورة أخرى مهما حدث.
- *  - الحجم: A−/A+ يكتبان fontScale في المتجر المشترك المُخزَّن، بلا إعادة
- *    تركيب القائمة ولا فقدان الموضع (إعادة تثبيت على آية المرساة بعد إعادة التدفق).
- *  - المتابعة: آخر موضع يُحفظ بترددات (debounce) ويُفرَّغ عند مغادرة الشاشة،
- *    وتُستعاد آية الموضع/رقم الصفحة/الآية المطلوبة عند الفتح.
+ * قارئ المصحف المستمر: سورة واحدة = صفحة قراءة واحدة متصلة (FlatList) بلا
+ * تقليب صفحات ولا صور، والنص حرفيًا من المصدر (quran-uthmani) والرقم سورة:آية
+ * هو مفتاح التلاوة والتنقل والحفظ. الصوت لا يعبر بين السور تلقائيًا، والحجم
+ * يكتب fontScale في متجر مشترك بلا فقدان الموضع، وآخر موضع يُحفظ بتردد
+ * ويُستعاد آية الموضع أو رقم الصفحة أو الآية المطلوبة.
  */
 export default function QuranReader() {
   const colors = useColors();
@@ -107,8 +99,7 @@ export default function QuranReader() {
   const id = Number(surahId);
   const validId = Number.isInteger(id) && id >= 1 && id <= 114;
   const surahName = surah ?? '';
-  // القارئ المختار من الإعدادات — يُمرَّر لكل طلب صوت (تغييره يُغيّر مفتاح
-  // الكاش فيعيد جلب الصوت وعزفه بالقارئ الجديد فعلًا).
+  // القارئ المختار من الإعدادات — يُمرَّر لكل طلب صوت (تغييره يُغيّر مفتاح الكاش).
   const reciterId = Math.round(settings.reciterId) || DEFAULT_RECITER_ID;
 
   // خط أميري قرآن — يدعم الحركات/الشدة/المد/الهمزات/علامات الوقف كاملة.
@@ -118,7 +109,6 @@ export default function QuranReader() {
     query: { enabled: validId },
   });
 
-  // ---------- حالة القراءة ----------
   // الآية المختارة (بداية التلاوة الافتراضية = 1 حتى أول اختيار فعلي).
   const [selectedAyah, setSelectedAyah] = useState(1);
   // آية لوحة التفاصيل (تظهر عند الضغط المطول). منفصلة عن التلاوة.
@@ -127,7 +117,6 @@ export default function QuranReader() {
   // آية التلاوة الحالية (null = صامت) — منفصلة تمامًا عن حالة القراءة.
   const [playingAyah, setPlayingAyah] = useState<number | null>(null);
   const [mode, setMode] = useState<PlayMode>('single');
-  // آخر موضع محفوظ (يُقرأ مرة للتموضع).
   const [resumeLoaded, setResumeLoaded] = useState(false);
   // القائمة جاهزة للعرض بعد تحديد آية الفتح (تمنع وميض "أول السورة").
   const [listReady, setListReady] = useState(false);
@@ -146,15 +135,13 @@ export default function QuranReader() {
   const pendingAnchorRef = useRef<number | null>(null);
   const prevFontScaleRef = useRef(settings.fontScale);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // جواز الحفظ: يظل مغلقًا حتى تظهر آية المرساة (موضع الفتح) في الرؤية فعليًا.
-  // يمنع تسريب "آية 1" الابتدائية إلى آخر موضع محفوظ أثناء نافذة الاستعادة
-  // (المشهد يُركَّب أعلى القائمة ثم يُمرَّر إلى المرساة بعد قياس الصفوف).
+  /** جواز الحفظ: يظل مغلقًا حتى تظهر آية المرساة في الرؤية فعلًا، فلا تتسرب آية 1
+   *  الابتدائية فوق آخر موضع محفوظ أثناء نافذة الاستعادة. */
   const persistReadyRef = useRef(false);
   // آية المرساة المطلوب استعادتها — تُصفَّر بمجرد وصولها إلى الرؤية.
   const restoreTargetRef = useRef<number | null>(null);
   const audioModeConfigured = useRef(false);
 
-  // آية تعليق التلاوة الحالية (لكل الآيات المعروضة داخل الصفوف المعلّمة).
   const playingAyahRef = useRef<number | null>(null);
   useEffect(() => {
     playingAyahRef.current = playingAyah;
@@ -165,16 +152,14 @@ export default function QuranReader() {
   const audioStatus = useAudioPlayerStatus(player);
   // حالة مصدر الصوت المُحمَّل في المشغّل: {مفتاح الآية, الرابط}.
   const playerStateRef = useRef<{ key: string; url: string } | null>(null);
-  // هل بدأ الصوت الحالي فعليًا في اللعب؟ (يمنع قبول didJustFinish الزائف القديم
-  // فور تحميل مصدر جديد — سبب قفزة "الآية بعد التالية" في الوضع المتتابع).
+  // هل بدأ الصوت الحالي في اللعب فعلًا؟ (يمنع قبول didJustFinish القديم بعد تحميل
+  // مصدر جديد — سبب قفزة "الآية بعد التالية" في الوضع المتتابع).
   const armedRef = useRef(false);
   // حراسة النهاية: didJustFinish يبقى true حتى بداية صوت جديد — نمنع القفز المزدوج.
   const finishedAyahRef = useRef<number | null>(null);
-  // كشف حافة صعود didJustFinish: لا نعالج إلا الانتقال من false إلى true، فبعد
-  // replace+play يبقى القديم true مؤقتًا ولا نعتبره نهاية صوت جديد.
+  // لا نعالج إلا الانتقال من false إلى true، فبعد replace+play يبقى القديم true.
   const prevDidJustFinishRef = useRef(false);
 
-  // صوت الآية الجارية وصوت الآية المطلوبة في لوحة التفاصيل.
   const ayahAudioQuery = useGetAyahAudio(validId ? id : 0, playingAyah, reciterId);
   const tafsirQuery = useGetQuranTafsir(validId ? id : 0, sheetAyah, {
     query: { enabled: validId && sheetOpen },
@@ -194,10 +179,7 @@ export default function QuranReader() {
     void setAudioModeAsync({ playsInSilentMode: true }).catch(() => undefined);
   }, [playingAyah, surahPlaying]);
 
-  /**
-   * فشل جلب رابط الصوت: نُظهر رسالة بدل ترك الاستثناء مرفوضًا.
-   *Offline نُميّزه ليقول "بدون إنترنت" بدل رسالة عامة.
-   */
+  /** فشل صوت الآية: رسالة بدل استثناء مرفوض، وOffline تُميَّز بـ"بدون إنترنت". */
   useEffect(() => {
     if (!ayahAudioQuery.isError) return;
     setAudioError(
@@ -217,8 +199,8 @@ export default function QuranReader() {
   const readerData = readerQuery.data;
   const verses = readerData?.verses ?? [];
 
-  // عناصر القائمة: فاصل صفحة مصحف ("— صفحة N —") ثم آياتها بالترتيب، فالقائمة
-  // رأسية واحدة مستمرة (لا تقليب ولا صور صفحات) وفواصل العرض لا تقسّم المحتوى.
+  // عناصر القائمة: فاصل صفحة مصحف ثم آياتها بالترتيب في قائمة رأسية واحدة
+  // مستمرة، وفواصل العرض لا تقسّم المحتوى.
   const listItems = useMemo<ReadingItem[]>(() => {
     const items: ReadingItem[] = [];
     for (const group of groupQuranVersesByPage(verses)) {
@@ -238,9 +220,8 @@ export default function QuranReader() {
     [listItems],
   );
 
-  // ---------- التلاوة ----------
-  // عند وصول رابط صوت الآية: حمّله في المشغّل وشغّله فورًا. شرط المفتاح يمنع
-  // تشغيل رابط آية سابقة مع آية جديدة (استقرار الحالة، لا إعادة تركيب).
+  // عند وصول رابط صوت الآية: حمّله وشغّله فورًا، وشرط المفتاح يمنع تشغيل رابط
+  // آية سابقة مع آية جديدة.
   useEffect(() => {
     if (playingAyah === null || surahPlaying) return;
     const key = `${reciterId}:${id}:${playingAyah}`;
@@ -255,10 +236,8 @@ export default function QuranReader() {
     player.play();
   }, [player, playingAyah, id, reciterId, surahPlaying, ayahAudioQuery.isPending, ayahAudioQuery.data, setAudioError]);
 
-  // صوت السورة كاملة: شغّل الملف المحلي إن كان منزَّلًا (تلاوة كاملة بلا إنترنت)،
-  // وإلا فحمّل رابط السورة من الشبكة وشغّله. كان التأثير ينتظر نجاح
-  // surahAudioQuery أولًا، فسورة mp3 منزَّلة كانت لا تزال تتطلب اتصالًا حيًّا —
-  // أي أن مسار "التشغيل بدون إنترنت" كان موجودًا في التخزين لكنه غير مستخدم.
+  // صوت السورة كاملة: شغّل الملف المحلي إن كان منزَّلًا (بلا إنترنت)، وإلا رابط السورة
+  // من الشبكة؛ كان بانتظار نجاح surahAudioQuery، فسورة mp3 المنزَّلة ظلت تتطلب اتصالًا حيًّا.
   useEffect(() => {
     if (!surahPlaying) return;
     const key = `surah:${reciterId}:${id}`;
@@ -307,12 +286,11 @@ export default function QuranReader() {
     }
   }, [mode, playingAyah, id, reciterId, queryClient]);
 
-  /**
-   * نهاية الصوت: نعالج حافة الصعود فقط didJustFinish (false→true) بعد أن بدأ
-   * الصوت فعلًا (armed). في وضع "الآية" نتوقف؛ في "متتابع" ننتقل إلى الآية
-   * التالية قانونيًا (سورة:آية) حتى آخر آية في السورة ثم نتوقف؛ في "السورة"
-   * نُنهي تلاوة الملف كاملًا. لا عبور تلقائي بين السور أبدًا.
-   */
+/**
+ * نهاية الصوت: حافة الصعود فقط didJustFinish بعد بدء الصوت فعلًا. "الآية" نتوقف،
+ * "متتابع" ننتقل للآية التالية قانونيًا حتى آخر السورة ثم نتوقف، "السورة" ننهي الملف.
+ * لا عبور تلقائي بين السور أبدًا.
+ */
   useEffect(() => {
     const didFinish = audioStatus.didJustFinish;
     if (didFinish === prevDidJustFinishRef.current) return;
@@ -339,8 +317,8 @@ export default function QuranReader() {
     }
   }, [audioStatus.didJustFinish, surahPlaying, playingAyah, mode, id]);
 
-  // بدء/إيقاف تلاوة آية — قارئ مستقر: يقرأ player.playing مباشرة (بلا اشتراك
-  // متكرر) فيبقى النداء ثابت الهوية فلا تشتغل ذاكرة الصفوف بلا داعٍ.
+  // بدء/إيقاف تلاوة آية — نقرأ player.playing مباشرة (بلا اشتراك متكرر) فيبقى النداء
+  // ثابت الهوية فلا تشتغل ذاكرة الصفوف بلا داعٍ.
   const toggleAyahAudio = useCallback(
     (n: number) => {
       setSelectedAyah(n);
@@ -417,8 +395,7 @@ export default function QuranReader() {
     [mode, playingAyah, surahPlaying, player],
   );
 
-  // ---------- تفاعلات الآية ----------
-  // نقرة = تشغيل الآية نفسها تمامًا (بداية دقيقة من الآية المختارة).
+  // نقرة = تشغيل الآية نفسها تمامًا.
   const handleAyahPress = useCallback(
     (n: number) => {
       toggleAyahAudio(n);
@@ -432,7 +409,6 @@ export default function QuranReader() {
     setSheetOpen(true);
   }, []);
 
-  // ---------- حجم الخط ----------
   const fontScaleIndex = FONT_SCALES.indexOf(settings.fontScale as (typeof FONT_SCALES)[number]);
   const stepFont = useCallback(
     (direction: -1 | 1) => {
@@ -443,8 +419,8 @@ export default function QuranReader() {
     [fontScaleIndex, save],
   );
 
-  // تغيير الحجم: لا إعادة تركيب ولا قفز للأول — نثبّت المشهد على آية المرساة
-  // بعد إعادة التدفق (onContentSizeChange) بما أن ارتفاع الصفوف يتغير.
+  // تغيير الحجم: بلا إعادة تركيب ولا قفز للأول — نثبّت المشهد على آية المرساة بعد
+  // إعادة التدفق لأن ارتفاع الصفوف يتغير.
   useEffect(() => {
     if (prevFontScaleRef.current === settings.fontScale) return;
     prevFontScaleRef.current = settings.fontScale;
@@ -452,7 +428,6 @@ export default function QuranReader() {
     pendingAnchorRef.current = viewedAyahNumberRef.current;
   }, [settings.fontScale, listReady]);
 
-  // ---------- آخر موضع (استئناف) ----------
   useEffect(() => {
     let active = true;
     setResumeLoaded(false);
@@ -578,7 +553,7 @@ export default function QuranReader() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, surahName]);
 
-  // ---------- المتابعة التلقائية للآية الجارية ----------
+  // المتابعة التلقائية للآية الجارية
   useEffect(() => {
     if (playingAyah === null || !listReady) return;
     const idx = indexOfAyah(playingAyah);
@@ -587,7 +562,7 @@ export default function QuranReader() {
     listRef.current?.scrollToIndex({ index: idx, viewPosition: 0.35, animated: true });
   }, [playingAyah, listReady, indexOfAyah]);
 
-  // ---------- معالجات القائمة (مراجع ثابتة — RN يمنع تغييرها بين الرندرات) ----------
+  // مراجع ثابتة: RN يمنع تغيير معالجات القائمة بين الرندرات
   const rowEstimateRef = useRef(120);
   rowEstimateRef.current = mushafLineHeight + spacing.md;
 
@@ -619,8 +594,8 @@ export default function QuranReader() {
   const viewabilityConfigRef = useRef({ itemVisiblePercentThreshold: 60 });
 
   const onScrollToIndexFailedRef = useRef(({ index }: { index: number }) => {
-    // بدون getItemLayout (صفوف بارتفاعات متنوعة): نقترب بالتمرير ثم نعيد الدقة
-    // عبر onContentSizeChange بعد قياس الصفوف المتاخمة.
+    // بلا getItemLayout (صفوف بارتفاعات متنوعة) نقترب بالتمرير ثم نعيد الدقة عبر
+    // onContentSizeChange بعد قياس الصفوف.
     retryIndexRef.current = index;
     listRef.current?.scrollToOffset({
       offset: Math.max(0, index - 2) * rowEstimateRef.current,
@@ -657,7 +632,6 @@ export default function QuranReader() {
     }
   }, [verses, sheetAyah, readerData?.nameArabic]);
 
-  // ---------- بحث/انتقال داخل السورة (آية أو صفحة) ----------
   const [jumpTarget, setJumpTarget] = useState('');
   const [jumpMode, setJumpMode] = useState<'ayah' | 'page'>('ayah');
   const [jumpError, setJumpError] = useState<string | null>(null);
@@ -700,7 +674,6 @@ export default function QuranReader() {
     }
   }, [jumpTarget, jumpMode, indexOfAyah, readerData?.versesCount, verses]);
 
-  // ---------- حفظ السورة للتلاوة بدون إنترنت (تنزيل سورة واحدة) ----------
   const [savedLabel, setSavedLabel] = useState<string | null>(null);
   const savedLabelTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveSurah = useCallback(() => {
@@ -714,7 +687,6 @@ export default function QuranReader() {
     router.push('/quran-download');
   }, [router]);
 
-  // ---------- أوصاف العرض ----------
   const revelationLabel = readerData
     ? readerData.revelationPlace === 'makkah'
       ? 'مكية'
@@ -740,7 +712,7 @@ export default function QuranReader() {
           ? 'متتابع حتى آخر السورة'
           : 'تشغيل الآية فقط';
 
-  // ---------- عارض القائمة (يُعرَّف قبل أي عودة مبكرة — ثبات الـ hooks) ----------
+  // عارض القائمة يُعرَّف قبل أي عودة مبكرة ثبات الـ hooks
   // صف الآية: نص المصحف حرفيًا + رقم، والتمييز: جاري التلاوة / مختار اللوحة.
   const renderVerse = useCallback(
     ({ item }: { item: ReadingItem }) => {
@@ -788,7 +760,6 @@ export default function QuranReader() {
 
   const isSheetAyahPlaying = playingAyah === sheetAyah && audioStatus.playing;
 
-  // ---------- قيود العرض المبكرة (كل الـ hooks أعلاه قبلها) ----------
   if (!validId) {
     return (
       <Screen>
@@ -836,7 +807,6 @@ export default function QuranReader() {
 
   return (
     <Screen scroll={false} contentStyle={styles.readerContent}>
-      {/* ترويسة السورة */}
       <View style={styles.readerHeader}>
         <IconButton icon="arrow-right" label="العودة" onPress={() => router.back()} variant="soft" />
         <View style={styles.readerTitle}>
@@ -881,7 +851,6 @@ export default function QuranReader() {
         </Pressable>
       </View>
 
-      {/* بحث/انتقال داخل السورة: اكتب رقم آية أو صفحة ثم اختر النوع */}
       <View style={[styles.jumpBar, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
         <TextInput
           ref={jumpInputRef}
@@ -945,7 +914,6 @@ export default function QuranReader() {
       </View>
       {jumpError ? <Text style={styles.jumpErrorText}>{jumpError}</Text> : null}
 
-      {/* تنزيل السورة الحالية أو المصحف كاملًا للاستخدام بدون إنترنت */}
       <View style={[styles.downloadBar, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
         {offlineSupported() ? (
           <Pressable
@@ -995,7 +963,6 @@ export default function QuranReader() {
         </View>
       ) : null}
 
-      {/* قارئ المصحف المستمر: سورة واحدة = كل الآيات في حاوية تمرير رأسية واحدة */}
       <FlatList
         ref={listRef}
         style={styles.listStyle}
@@ -1014,7 +981,6 @@ export default function QuranReader() {
         onContentSizeChange={handleContentSizeChange}
       />
 
-      {/* شريط التلاوة: آية محددة أو متتابع أو السورة كاملة، مع إيقاف مؤقت/نهائي */}
       <View style={[styles.audioBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <View style={styles.audioBarMain}>
           <View style={[styles.modeSwitch, { backgroundColor: colors.secondary }]}>
@@ -1093,7 +1059,6 @@ export default function QuranReader() {
         </Text>
       </View>
 
-      {/* لوحة التفاصيل: التفسير + المفضلة + المشاركة */}
       <Modal
         visible={sheetOpen}
         transparent
@@ -1138,7 +1103,6 @@ export default function QuranReader() {
               </Text>
             </View>
 
-            {/* أدوات الآية: تشغيل/إيقاف + مفضلة + مشاركة */}
             <View style={styles.sheetActions}>
               <Pressable
                 accessibilityRole="button"
@@ -1218,11 +1182,8 @@ export default function QuranReader() {
   );
 }
 
-/**
- * صف آية واحدة — مُعلَّم بـ React.memo: لا يُعاد رسمه إلا إذا تغيّرت قيمه
- * فعليًا (النص، الحجم، التمييز) فلا يعاد تركيب القائمة كاملة عند تغيّر شريط
- * التلاوة أو التمرير. النص يُعرض حرفيًا كما ورد من المصدر.
- */
+/** صف آية واحدة مُعلَّم بـ React.memo: لا يُعاد رسمه إلا إذا تغيّرت قيمه فعلًا،
+ *  والنص يُعرض حرفيًا كما ورد من المصدر. */
 const VerseRow = React.memo(function VerseRow({
   verse,
   fontSize,

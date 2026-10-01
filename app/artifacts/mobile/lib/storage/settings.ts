@@ -18,10 +18,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   prayerNotifications: false,
 };
 
-/** ثوابت حجم خط المصحف — تصاعدية حول المتوسط (1). 0.7 تتيح حجمًا أصغر فعلًا. */
+/** ثوابت حجم خط المصحف — تصاعدية حول المتوسط (1)، وأدناها ٠.٧ أصغر حجم فعلي. */
 export const FONT_SCALES = [0.7, 0.85, 1, 1.15, 1.3, 1.5] as const;
 
-/** تسميات عربية لكل مقاس — مشتركة بين شاشة الإعدادات وشريط أدوات القارئ. */
 export const FONT_SCALE_LABELS: Record<number, string> = {
   0.7: 'أصغر',
   0.85: 'صغير',

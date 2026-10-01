@@ -1,12 +1,9 @@
 /**
- * Web stub for the offline Quran store.
- *
- * expo-sqlite's web build needs a wa-sqlite WASM asset that isn't shipped
- * (Metro resolves `expo-sqlite/web/worker.ts` on web and fails on the missing
- * .wasm). Rather than bundling WASM for web, the offline download feature is
- * native-only; the web app stays online-only and everything else keeps
- * working. Metro picks this file over quranDb.native.ts via platform
- * extensions.
+ * Web stub for the offline Quran store. Metro picks this file over
+ * quranDb.native.ts via platform extensions. expo-sqlite's web build needs a
+ * wa-sqlite WASM asset that isn't shipped (worker.ts fails on the missing
+ * .wasm), so rather than bundling WASM for web, offline download is native-only
+ * and the web app stays online-only; everything else keeps working.
  */
 
 import type {
@@ -84,12 +81,11 @@ export type LocalQuranVerseHit = {
 };
 
 export function searchLocalQuranVerses(_query: string, _limit?: number): LocalQuranVerseHit[] {
-  // No local store on web — verse search needs downloaded chapters.
+  // No local store on web — search needs downloaded chapters.
   return [];
 }
 
 export function storeLocalSurah(_surah: QuranSurah): void {
-  // No local store on web.
 }
 
 export function getLocalJuz(_juz: number): QuranJuz | null {
@@ -104,7 +100,6 @@ export function getLocalTafsir(
 }
 
 export function storeLocalTafsir(_tafsir: QuranTafsir): void {
-  // No local store on web.
 }
 
 export async function downloadQuranAudioFile(
@@ -134,7 +129,6 @@ export function storeLocalSurahAudio(
   _reciterId: number,
   _audio: QuranAudio,
 ): void {
-  // No local store on web.
 }
 
 export function offlineSupported(): boolean {

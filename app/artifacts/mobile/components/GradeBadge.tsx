@@ -3,18 +3,14 @@ import { StyleSheet, Text, View } from 'react-native';
 import { useColors } from '@/hooks/useColors';
 import { useHadithGrade, type HadithItem } from '@/lib/api';
 
-/**
- * شارة درجة الحديث — لون يعكس الدرجة كما طلب المستخدم:
- *   صحيح → أخضر | حسن → أصفر | ضعيف/موضوع/منكر → أحمر | غير ذلك → رمادي محايد.
- * لا تُعرض إطلاقًا إذا لم توجد درجة من المصدر (لا اختراع بيانات).
- */
+/** شارة درجة الحديث: صحيح أخضر، حسن أصفر، ضعيف/موضوع أحمر، وما عداه رمادي
+ *  محايد — ولا تُعرض إطلاقًا بلا درجة من المصدر (لا اختراع بيانات). */
 
 const GOOD = /^(صحيح|صحيح لغيره|متفق عليه|إسناده قوي|حديث صحيح)/;
 const FAIR = /^(حسن|حسن لغيره|حسن صحيح|قوي)/;
 const BAD = /^(ضعيف|ضعيف جدًا|موضوع|منكر|باطل|مدلس|لا يصح)/;
 
-// قيم مصدر الإثراء (fawazahmed0) تصل حرفيًا بالإنجليزية — التصنيف هنا
-// للتلوين فقط، النص المعروض يبقى حرفيًا بلا أي تعديل أو ترجمة.
+// مصدر الإثراء يردّ الدرجة بالإنجليزية حرفيًا: التصنيف للتلوين فقط، والنص المعروض بلا تعديل أو ترجمة.
 const GOOD_EN = /^(sahih|sahih lighairihi|sahih isnaad|hasan sahih|mutawatir|sahih mutawatir|agreed upon|sahih - agreed upon)/i;
 const FAIR_EN = /^(hasan|hasan lighairihi|hasan isnaad|isnaad hasan|isnaad sahih)/i;
 const BAD_EN = /^(daif|very daif|mau?du|munkar|shadh|mursal|la yastawee)/i;
@@ -42,8 +38,7 @@ export function GradeBadge({
   showMissing = false,
 }: {
   grade?: string;
-  /** عندما true تعرض شارة "غير متوفر" المحايدة بدل الإخفاء — للمصادر
-   *  التي لا تقدم درجة (hadis-api للكتب التسعة). لا نخترع حكمًا أبدًا. */
+  /** true ⇒ شارة "غير متوفر" المحايدة بدل الإخفاء لمصادر بلا درجة (hadis-api) — ولا نخترع حكمًا. */
   showMissing?: boolean;
 }) {
   const trimmed = grade?.trim();
@@ -88,12 +83,9 @@ const styles = StyleSheet.create({
   text: { fontSize: 11, fontWeight: '700' },
 });
 
-/**
- * شارة درجة لعنصر قائمة يحمّل درجته **كسولًا** (useHadithGrade): القائمة
- * تظهر فورًا بلا إثراء محبوس، والبطاقات المرئية فقط (FlatList virtualization)
- * تطلب درجة كل حديث ثم تُحفظ في كاش React Query. لا تُنشئ درجة أبدًا —
- * بلا درجة من المصدر = البادج "غير متوفرة" أو مخفية حسب showMissing.
- */
+/** الدرجة تُحمَّل **كسولًا** لقائمة: تظهر فورًا، والبطاقات المرئية فقط
+ *  (افتراضيّة FlatList) تطلب الدرجة وتُحفظ في كاش React Query؛ وبلا درجة من
+ *  المصدر = البادج "غير متوفر" أو مخفية. */
 export function ItemGrade({
   item,
   bookSlug,

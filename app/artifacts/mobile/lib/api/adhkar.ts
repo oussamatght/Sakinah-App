@@ -3,23 +3,17 @@ import { UpstreamError } from "./types";
 import type { Dhikr } from "./types";
 
 /**
- * مصدر الأذكار: مستودع Seen-Arabic (أذكار الصباح والمساء).
+ * مصدر الأذكار: مستودع Seen-Arabic. البنية متحقَّق منها حيًّا
+ * (scripts/probe-adhkar-shape.cjs): 34 عنصرًا بالحقول order, content, count,
+ * count_description, fadl, source, type, audio, hadith_text,
+ * explanation_of_hadith_vocabulary.
  *
- * البنية الفعلية للتحقّق منها حيًّا (scripts/probe-adhkar-shape.cjs):
- *   34 عنصرًا، الحقول:
- *     order, content, count, count_description, fadl, source, type,
- *     audio, hadith_text, explanation_of_hadith_vocabulary
+ *   `type` مستنتج من نصوص العناصر لا مُفترَض: 0 ذكر عام (16)، 1 صباح (10)، 2 مساء (8).
+ *   جودة البيانات: content و source و count_description ممتلئة دائمًا، و`fadl`
+ *   فارغ في 15 من 34 ⇒ لا يُعرض إلا إن كان نصًّا حقيقيًا.
  *
- *   `type` معناه (مُستنتج من نصوص العناصر نفسها، لا مُفترَض):
- *     0 → ذكر عام (لا يختصّ بالصبح ولا المساء)  — 16 عنصرًا
- *     1 → ذكر الصباح (نصوصها "أصبحنا/أصبح…")     — 10 عناصر
- *     2 → ذكر المساء  (نصوصها "أمسينا/أمسى…")     — 8 عناصر
- *
- *   جودة البيانات: content و source و count_description ممتلئة دائمًا،
- *   و`fadl` فارغ في 15 من 34 ⇒ لا يُعرض إلا إن كان نصًّا حقيقيًا.
- *
- *   ملاحظة: `getAdhkar` كان cast بلا تحقّق (`data as Dhikr[]`) فأي تغيير في
- *   المصدر كان يكسر الشاشة بصمت. هنا نُتحقّق صفًّا صفًّا ونُسقط الناقص.
+ *   getAdhkar كان cast بلا تحقّق فأي تغيير في المصدر كان يكسر الشاشة بصمت،
+ *   فصار التحقّق صفًّا صفًّا مع إسقاط الناقص.
  */
 
 const ADHKAR_API =
@@ -27,29 +21,27 @@ const ADHKAR_API =
 
 const SOURCE_LABEL = "الأذكار";
 
-/** نص نظيف: يحوّل أي قيمة إلى نص مقصوص بلا فراغات طرفية، "" إن لم يكن نصًّا. */
 function text(value: unknown): string {
   if (typeof value === "string") return value.trim();
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
   return "";
 }
 
-/** عدد صحيح موجب، أو القيمة الافتراضية — لا NaN يتسرّب إلى العرض. */
+/** عدد صحيح موجب أو الافتراضي — لا NaN يتسرّب إلى العرض. */
 function positiveInt(value: unknown, fallback: number): number {
   const parsed = typeof value === "number" ? value : Number.parseInt(text(value), 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-/** عدد صحيح (يقبل 0) — يُستخدم في `type` الذي قيمته 0/1/2. */
+/** عدد صحيح يقبل 0 — لقيمة `type` (0/1/2). */
 function int(value: unknown, fallback: number): number {
   const parsed = typeof value === "number" ? value : Number.parseInt(text(value), 10);
   return Number.isInteger(parsed) ? parsed : fallback;
 }
 
 /**
- * يحوّل عنصرًا خامًا إلى Dhikr موحّدة، أو null إن كان ناقصًا لدرجة أنه
- * لا يُعرض (بلا نص ولا ترتيب). الحقول الاختيارية تصبح "" بدل undefined
- * حتى لا تتسرّب "undefined" إلى النصوص العربية على الشاشة.
+ * عنصر خام → Dhikr موحّدة، أو null إن كان ناقصًا لدرجة عدم عرضه (بلا نص ولا
+ * ترتيب)؛ والحقول الاختيارية تصبح "" حتى لا تتسرّب "undefined" إلى النصوص.
  */
 export function parseDhikr(raw: unknown): Dhikr | null {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
@@ -66,8 +58,7 @@ export function parseDhikr(raw: unknown): Dhikr | null {
     order,
     content,
     count,
-    // الوصف يأتي من المصدر ("مِائَةُ مَرَّةٍ")؛ عند غيابه نصٌّ محايد
-    // مبني على العدد الحقيقي — لا رقم مخترع.
+    // الوصف من المصدر، وعند غيابه نص محايد مبني على العدد الحقيقي — لا رقم مخترع.
     count_description: countDescription || `تكرار ${count}`,
     fadl: text(row.fadl),
     source: text(row.source),
@@ -78,7 +69,6 @@ export function parseDhikr(raw: unknown): Dhikr | null {
   };
 }
 
-/** كل الأذكار من المصدر، مرتّبة بالترتيب الأصلي (order تصاعديًا). */
 export async function fetchAdhkar(): Promise<Dhikr[]> {
   const data = await fetchJson<unknown>(ADHKAR_API, SOURCE_LABEL);
   if (!Array.isArray(data)) {

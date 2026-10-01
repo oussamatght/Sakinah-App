@@ -452,10 +452,8 @@ export function DailyVerse() {
 }
 
 /**
- * بطاقة "ذكر اليوم" على الشاشة الرئيسية.
- *
- * تعرض ذكرًا حقيقيًا من المصدر (`text`) لا نصًّا موضوعًا. فإذا لم يصل
- * المحتوى بعد (أو فشل) تبقى العبارة التعريفية بدل فراغ أو نص مخترع.
+ * بطاقة "ذكر اليوم" — تعرض ذكرًا حقيقيًا من المصدر لا نصًّا موضوعًا؛ فإن لم
+ * يصل المحتوى تبقى العبارة التعريفية بدل فراغ أو نص مخترع.
  */
 export function DailyDhikr({
   onPress,
@@ -467,7 +465,6 @@ export function DailyDhikr({
   onPress: () => void;
   /** نصّ الذكر كما ورد في المصدر. */
   text?: string;
-  /** سطر ثانوي صغير تحت العنوان (مثل تصنيف الذكر). */
   meta?: string;
   eyebrow?: string;
   hint?: string;
@@ -605,10 +602,7 @@ export function SearchBar({
   );
 }
 
-/**
- * Shared status component.
- * Keeps EmptyState and ErrorState visually consistent without duplicating UI.
- */
+/** Shared status shell so EmptyState and ErrorState stay visually consistent. */
 export function StatusState({
   icon,
   title,
@@ -675,17 +669,10 @@ export function EmptyState({
   return <StatusState icon="inbox" title={title} message={message} />;
 }
 
-/**
- * هل الفشل بسبب انقطاع الشبكة فعلًا؟
- *
- * كان سابقًا مطابقةً على النص `/network|offline|fetch|internet|connection/`
- * وهي تطابق كلمة "fetch" في أي رسالة، فكان أي خطأ خادم (500) أو استجابة تالفة
- * يظهر للمستخدم كـ"لا يوجد اتصال" رغم أن الواي فاي شغّال. الآن:
- *  1) `UpstreamError.offline` من طبقة الشبكة هو المصدر الأول للحكم.
- *  2) `TypeError` thrown من fetch هي إشارة انقطاع قياسية.
- *  3) `navigator.onLine === false` دليل مباشر من النظام.
- *  4) النمط النصي الأخير محصور بعبارات انتقال صريحة (لا "fetch" ولا "timeout").
- */
+/** هل الفشل بسبب انقطاع الشبكة فعلًا؟ كان سابقًا يطابق `/network|offline|
+ *  fetch|.../` فيفترض "fetch" كلمة شبكة، فيظهر خطأ 500 كـ"لا يوجد اتصال". الآن:
+ *  1) UpstreamError.offline 2) TypeError من fetch 3) navigator.onLine
+ *  4) عبارات صريحة فقط (لا "fetch" ولا "timeout"). */
 export function isOfflineError(error: unknown): boolean {
   if (error && typeof error === "object" && "offline" in error) {
     return Boolean((error as { offline?: unknown }).offline);
@@ -709,7 +696,6 @@ export function ErrorState({
 }: {
   offline?: boolean;
   onRetry?: () => void;
-  /** نصوص مخصّصة: كل خطأ له سبب مختلف (رابط ناقص، كتاب غير موجود، …) */
   title?: string;
   message?: string;
   actionLabel?: string;

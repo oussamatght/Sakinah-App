@@ -7,18 +7,22 @@ import { IconButton, LoadingState, Screen } from "@/components/ui";
 import { radii, spacing, typography } from "@/constants/tokens";
 import { useColors } from "@/hooks/useColors";
 import { useFavoritesList, useSettings } from "@/hooks/useAppState";
-import { categoryLabel, findAdhkar, useAdhkarProgress, useAdhkarWird, useGetAdhkar } from "@/hooks/useAdhkar";
+import {
+  categoryLabel,
+  findAdhkar,
+  useAdhkarProgress,
+  useAdhkarWird,
+  useGetAdhkar,
+} from "@/hooks/useAdhkar";
 import type { Dhikr } from "@/lib/api/types";
 
 /** الأرقام الكبيرة جديرة باختصار عملي: هدف ١٠٠ لا يُنجز ضغطةً ضغطة. */
 const BIG_STEP_THRESHOLD = 20;
 
 /**
- * شاشة ذكر واحد مع عدّاده.
- *
- * العدّاد قائم على التكرار الحقيقي من المصدر (`count`) — ولا يُطلب منه عدد
- * مخترع. التقدّم يُحفظ محليًا لكل يوم، وعند بلوغ التكرار يُسجَّل الذكر في
- * ورد اليوم. وكل خطوة تُطلق اهتزازًا خفيفًا واحدًا (بلا اهتزاز على الويب).
+ * شاشة ذكر واحد مع عدّاده قائم على التكرار الحقيقي من المصدر (`count`) لا على
+ * عدد مخترع: التقدّم يُحفظ محليًا لكل يوم، وعند بلوغ التكرار يُسجَّل الذكر في
+ * ورد اليوم. وكل خطوة تُطلق اهتزازًا واحدًا (بلا اهتزاز على الويب).
  */
 export default function DhikrPracticeScreen() {
   const colors = useColors();
@@ -30,7 +34,7 @@ export default function DhikrPracticeScreen() {
 
   const { data, isPending } = useGetAdhkar();
   const { counts, increment, setCount } = useAdhkarProgress();
-  const { goal, completeWird } = useAdhkarWird();
+  const { setCurrentIndex } = useAdhkarWird();
   const { isFavorite, toggle } = useFavoritesList();
 
   const dhikr: Dhikr | undefined = useMemo(
@@ -54,30 +58,30 @@ export default function DhikrPracticeScreen() {
     setJustCompleted(false);
   }, [dhikr?.order]);
 
-  /**
-   * كل زيادة تمرّ من هنا: ترفع العدّاد المخزَّن (لا حالة React) وتُقصّ عند
-   * التكرار المطلوب، فالنقر السريع لا يضيع، و"زيادة ١٠" تُتمّ الورد تمامًا
-   * كما تفعل النقرة الواحدة.
-   */
+  // موضع المتابعة في سجلّ اليوم لا في ذاكرة الشاشة، فيبدأ من الصفر مع كل يوم جديد؛ يُكتب عند فتح ذكر لا عند كل نقرة.
+  useEffect(() => {
+    if (index < 0) return;
+    void setCurrentIndex(index);
+  }, [index, setCurrentIndex]);
+
+  // كل زيادة ترفع العدّاد المخزَّن (لا حالة React) وتُتمّ الورد في الكتابة نفسها، فالنقر السريع لا يضيع و"زيادة ١٠" تُتمّ كما النقرة الواحدة.
   const advance = useCallback(
     (by: number) => {
       if (!dhikr) return;
-      const willComplete = counted + by >= target;
-      void increment(dhikr.order, target, by);
       if (Platform.OS !== "web") {
         void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
       }
-      if (willComplete) {
+      void increment(dhikr.order, target, by).then((result) => {
+        if (!result.completedNow) return;
         setJustCompleted(true);
         if (Platform.OS !== "web") {
           void Haptics.notificationAsync(
             Haptics.NotificationFeedbackType.Success,
           ).catch(() => undefined);
         }
-        void completeWird(dhikr.order, goal?.target ?? 1);
-      }
+      });
     },
-    [completeWird, counted, dhikr, goal?.target, increment, target],
+    [dhikr, increment, target],
   );
 
   const tap = useCallback(() => advance(1), [advance]);

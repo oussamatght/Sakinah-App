@@ -1,11 +1,8 @@
 import { readJson, storageKeys, writeJson } from "./client";
 
 /**
- * Local wird (daily Quran portion) persistence — Phase A groundwork.
- *
- * Everything lives on-device via AsyncStorage; the Phase-2 server endpoints
- * (wird/favorites in @workspace/db) can sync this later without changing the
- * shape stored here.
+ * Local wird (daily Quran portion) persistence — everything on-device via
+ * AsyncStorage; the Phase-2 server endpoints can sync this later unchanged.
  */
 
 export type WirdMode = "pages" | "khatma";
@@ -67,7 +64,6 @@ export async function getWirdDays(): Promise<WirdDayRecord[]> {
   return (await readJson<WirdDayRecord[]>(storageKeys.wirdDays)) ?? [];
 }
 
-/** Adds pages to today's record (creating it if needed) and returns it. */
 export async function addWirdPages(pages: number): Promise<WirdDayRecord> {
   const goal = await getWirdGoal();
   const targetPages = goal ? effectiveDailyPages(goal) : pages;
@@ -87,7 +83,7 @@ export async function addWirdPages(pages: number): Promise<WirdDayRecord> {
   return next;
 }
 
-/** Streak = consecutive days (ending today or yesterday) with completed=true. */
+/** Streak = consecutive completed days ending today or yesterday. */
 export async function getWirdStreak(): Promise<WirdStreak> {
   const days = await getWirdDays();
   const completed = new Set(
@@ -111,7 +107,6 @@ export async function getWirdStreak(): Promise<WirdStreak> {
     cursor = dayShift(cursor, -1);
   }
 
-  // Longest: scan all completed days.
   let longest = 0;
   for (const day of completed) {
     if (!completed.has(dayShift(day, -1))) {
@@ -128,7 +123,6 @@ export async function getWirdStreak(): Promise<WirdStreak> {
   return { current, longest };
 }
 
-/** Everything the home progress card needs, in one call. */
 export async function getWirdSummary(): Promise<{
   goal: WirdGoal | null;
   today: WirdDayRecord | null;
@@ -147,24 +141,18 @@ export async function getWirdSummary(): Promise<{
   };
 }
 
-// ---------------------------------------------------------------------------
 // المنطق الحسابي الوحيد للورد (يُستعمل من كل الشاشات — لا حسابات داخل UI):
 //   remaining = max(dailyGoal - completed, 0)
 //   progress  = dailyGoal > 0 ? min(completed / dailyGoal, 1) : 0
-// ---------------------------------------------------------------------------
 
 export type WirdProgress = {
   /** الهدف اليومي المشتق من الهدف المحفوظ (صفحات). */
   dailyGoal: number;
   /** الصفحات المقروءة اليوم فقط (مفتاح YYYY-MM-DD). */
   completed: number;
-  /** max(dailyGoal - completed, 0). */
   remaining: number;
-  /** dailyGoal > 0 ? min(completed / dailyGoal, 1) : 0 */
   progress: number;
-  /** هل أُتم الورد اليوم؟ */
   isComplete: boolean;
-  /** هل يوجد هدف محفوظ أصلًا؟ */
   hasGoal: boolean;
 };
 
@@ -187,7 +175,6 @@ export function computeWirdProgress(
   };
 }
 
-/** نفس الحساب لكن مع قراءة التخزين — للشاشات. */
 export async function getWirdProgress(): Promise<WirdProgress> {
   const goal = await getWirdGoal();
   const days = await getWirdDays();

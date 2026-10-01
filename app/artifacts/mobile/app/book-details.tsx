@@ -58,8 +58,7 @@ export default function BookDetails() {
     author?: string;
   }>();
 
-  // مصدر غير معروف ⇒ null (المعطيات ناقصة) بدل الطي على "turath" الذي كان
-  // يجعل إسلاميك/إسلام هاوس يُطلبان من مزوّد تراث ⇒ undefined ⇒ شاشة فارغة.
+  // مصدر غير معروف ⇒ null لا الطي على "turath" (كان يجعل المزوّدين يُطلبان من تراث ⇒ شاشة فارغة).
   const source = parseBookSource(params.source);
   const rawId = params.rawId ?? "";
   const missingParams = !source || !rawId;
@@ -74,11 +73,10 @@ export default function BookDetails() {
   const chapters = detailsQuery.data?.chapters;
 
   /**
-   * القراءة داخل التطبيق متاحة إن كان المزوّد يدعمها **وللكتاب نصّ**.
-   * islamic.app يوفّر has_text لكل كتاب على حدة: كتب PDF فقط يجب ألّا
-   * يُعرض لها زر «ابدأ القراءة» ثم ينتهي القارئ بصفحة فارغة.
+   * القراءة داخل التطبيق متاحة إن كان المزوّد يدعمها **وللكتاب نصّ**: إسلاميك
+   * يوفّر has_text لكل كتاب، وكتب PDF فقط يجب ألّا يُعرض لها زر القراءة.
    */
-  const canRead = capabilities.canReadByPage && book?.hasText !== false;
+  const canRead = capabilities.canReadByPage && book?.readability === "readable";
 
   const authorQuery = useLibraryAuthor(
     source as IslamicLibrarySource,
@@ -87,8 +85,8 @@ export default function BookDetails() {
   const authorBio = authorQuery.data?.biography;
 
   const [chapterLimit, setChapterLimit] = useState(CHAPTERS_STEP);
-  // نرسم جزءًا من الفهرس فقط: map كامل داخل ScrollView يجمّد الشاشة على
-  // الكتب ذات成千يس العناوين. لا نضع FlatList داخل ScrollView (تحذير متداخل).
+  // نرسم جزءًا من الفهرس فقط: map كامل داخل ScrollView يجمّد الكتب ذات آلاف
+  // العناوين (ولا تضع FlatList داخل ScrollView).
   const visibleChapters = useMemo(
     () => (chapters ?? []).slice(0, chapterLimit),
     [chapters, chapterLimit],
@@ -105,11 +103,10 @@ export default function BookDetails() {
   };
 
   const openReader = (page = 1) => {
-    // مصدر غير معروف ⇒ لا ننتقل: `params.source = null` كان يتحوّل إلى نص
-    // "null" في الرابط فيعود القارئ بمصدر مجهول.
+    // مصدر غير معروف ⇒ لا ننتقل: `params.source = null` كان يصبح نص "null" في الرابط.
     if (!source) return;
-    // نبدأ من أول صفحة ** فيها نصّ فعلًا (الفهرس قد يبدأ من صفحة 12 مثلًا)،
-    // وإلا استقبل القارئ صفحة فارغة كأنها أول صفحة في الكتاب.
+    // نبدأ من أول صفحة ** فيها نصّ فعلًا (الفهرس قد يبدأ من صفحة 12)، وإلا استقبل
+    // القارئ صفحة فارغة كأنها أول صفحة في الكتاب.
     const firstRealPage =
       page > 1
         ? page
@@ -171,7 +168,6 @@ export default function BookDetails() {
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.content}>
-          {/* البطاقة الأساسية: العنوان + المؤلف + المصدر */}
           <View
             style={[
               styles.card,
@@ -254,9 +250,7 @@ export default function BookDetails() {
             </View>
           ) : null}
 
-          {/* الأفعال حسب قدرات المصدر:
-              تراث → قراءة داخل التطبيق + فهرس + فتح المصدر.
-              إسلام هاوس → تحميل PDF + المرفقات + فتح المصدر. */}
+          {/* الأفعال حسب قدرات المصدر: تراث قراءة+فهرس، وإسلام هاوس تحميل PDF. */}
           <View style={styles.actions}>
             {capabilities.canDownload &&
             (book.attachments?.length || book.downloadUrl) ? (
@@ -311,8 +305,7 @@ export default function BookDetails() {
                   styles.card,
                   { backgroundColor: colors.card, borderColor: colors.border },
                 ]}>
-                <Text
-                  style={[styles.sectionTitle, { color: colors.foreground }]}>
+                <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
                   الفهرس
                 </Text>
                 {visibleChapters.map((chapter: IslamicBookChapter, index) => (
@@ -368,9 +361,24 @@ export default function BookDetails() {
                 ) : null}
               </View>
             ) : null}
+
+            {!canRead && book?.readability !== "readable" && book?.source !== "turath" ? (
+              <View
+                style={[
+                  styles.card,
+                  { backgroundColor: colors.card, borderColor: colors.border },
+                ]}>
+                <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
+                  المحتوى غير متاح للقراءة داخل التطبيق
+                </Text>
+                <Text style={[styles.metaText, { color: colors.mutedForeground }]}>
+                  هذا الكتاب متاح بصيغة PDF فقط. استخدم زر «تحميل ملف الكتاب»
+                  لفتح المحتوى أو «فتح المصدر» لعرضه هناك.
+                </Text>
+              </View>
+            ) : null}
           </View>
 
-          {/* سيرة المؤلف إن وفرها المصدر */}
           {authorBio ? (
             <View
               style={[
@@ -390,7 +398,6 @@ export default function BookDetails() {
             </View>
           ) : null}
 
-          {/* مرفقات إسلام هاوس الإضافية (كلها PDFs مسموحة التحميل مع الإحالة) */}
           {book.attachments && book.attachments.length > 1 ? (
             <View
               style={[
@@ -585,6 +592,11 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: typography.bodySmall,
     fontWeight: "600",
+    textAlign: "right",
+  },
+  metaText: {
+    fontSize: typography.bodySmall,
+    lineHeight: 24,
     textAlign: "right",
   },
   moreButton: {
