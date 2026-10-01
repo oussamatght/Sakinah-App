@@ -8,7 +8,6 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 
@@ -45,9 +44,6 @@ import { useColors } from "@/hooks/useColors";
 type Mode = "books" | "topics";
 
 type SearchKind = "text" | "number";
-
-/** إصلاح التداخل مع الـ Tab Bar. */
-const TAB_BAR_HEIGHT = 84;
 
 function toArabicDigits(value: number | string): string {
   return String(value).replace(/[0-9]/g, (d) => "٠١٢٣٤٥٦٧٨٩"[Number(d)]);
@@ -138,9 +134,6 @@ function HadithCard({
 export default function HadithTab() {
   const colors = useColors();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
-
-  const bottomOverlap = TAB_BAR_HEIGHT + insets.bottom;
 
   const booksQuery = useGetHadithBooks();
   const categoriesQuery = useGetHadithCategories();
@@ -392,12 +385,7 @@ export default function HadithTab() {
                 data={books}
                 keyExtractor={(item) => item.slug}
                 showsVerticalScrollIndicator={false}
-                contentContainerStyle={[
-                  styles.list,
-                  {
-                    paddingBottom: bottomOverlap + spacing.md,
-                  },
-                ]}
+                contentContainerStyle={styles.list}
                 renderItem={({ item }) => (
                   <Pressable
                     testID={`book-${item.slug}`}
@@ -480,12 +468,7 @@ export default function HadithTab() {
                 data={categories}
                 keyExtractor={(item) => item.id}
                 showsVerticalScrollIndicator={false}
-                contentContainerStyle={[
-                  styles.list,
-                  {
-                    paddingBottom: bottomOverlap + spacing.md,
-                  },
-                ]}
+                contentContainerStyle={styles.list}
                 renderItem={({ item }) => (
                   <Pressable
                     testID={`category-${item.id}`}
@@ -991,12 +974,7 @@ export default function HadithTab() {
           data={sections}
           keyExtractor={(section) => `section-${section.section}`}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={[
-            styles.list,
-            {
-              paddingBottom: bottomOverlap + spacing.md,
-            },
-          ]}
+          contentContainerStyle={styles.list}
           renderItem={({ item: section }) => (
             <Pressable
               accessibilityRole="button"
@@ -1058,12 +1036,7 @@ export default function HadithTab() {
           data={[...(searchQuery.data?.items ?? []), ...offlineHits]}
           keyExtractor={(item, index) => `search-${item.id}-${index}`}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={[
-            styles.list,
-            {
-              paddingBottom: bottomOverlap + spacing.md,
-            },
-          ]}
+          contentContainerStyle={styles.list}
           ListHeaderComponent={
             <View>
               {searchQuery.isPending ? <LoadingState /> : null}
@@ -1133,12 +1106,7 @@ export default function HadithTab() {
           data={openSection.hadiths}
           keyExtractor={(hadith) => `sec-hadith-${hadith}`}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={[
-            styles.list,
-            {
-              paddingBottom: bottomOverlap + spacing.md,
-            },
-          ]}
+          contentContainerStyle={styles.list}
           ListHeaderComponent={
             <Pressable
               accessibilityRole="button"
@@ -1188,12 +1156,7 @@ export default function HadithTab() {
               data={items}
               keyExtractor={(item, index) => `${item.id}-${index}`}
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={[
-                styles.list,
-                {
-                  paddingBottom: bottomOverlap + spacing.md,
-                },
-              ]}
+              contentContainerStyle={styles.list}
               renderItem={({ item }) => (
                 <HadithCard
                   item={item}

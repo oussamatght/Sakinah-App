@@ -443,8 +443,8 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   tabText: { fontSize: typography.bodySmall, fontWeight: "700" },
-  list: { paddingBottom: 110 },
-  gridList: { paddingBottom: 110, paddingTop: spacing.md },
+  list: { paddingBottom: spacing.lg },
+  gridList: { paddingBottom: spacing.lg, paddingTop: spacing.md },
   verseResults: { gap: spacing.sm, paddingTop: spacing.lg },
   verseSectionTitle: {
     fontSize: typography.bodyLarge,

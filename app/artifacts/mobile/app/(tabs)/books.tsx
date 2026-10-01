@@ -10,7 +10,6 @@ import {
 
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import {
   useLibraryAdvancedSearch,
@@ -38,7 +37,6 @@ import { providerCapabilities } from "@/lib/books";
 import type { IslamicBook, IslamicLibrarySource } from "@/lib/books/types";
 
 const PAGE_SIZE = 20;
-const TAB_BAR_HEIGHT = 84;
 
 const EMPTY_ADVANCED: AdvancedSearchValue = {
   mode: "free",
@@ -74,9 +72,6 @@ function toArabicDigits(value: number | string): string {
 export default function BooksTab() {
   const colors = useColors();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
-
-  const bottomOverlap = TAB_BAR_HEIGHT + insets.bottom;
 
   const [search, setSearch] = useState("");
   const [query, setQuery] = useState("");
@@ -380,10 +375,7 @@ export default function BooksTab() {
           />
         )}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[
-          styles.listContent,
-          { paddingBottom: bottomOverlap + spacing.md },
-        ]}
+        contentContainerStyle={styles.listContent}
         ListHeaderComponent={
           <View>
             <AppHeader
