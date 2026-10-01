@@ -152,3 +152,18 @@ export class UpstreamError extends Error {
     this.offline = offline;
   }
 }
+
+/** أذكار الصباح والمساء — كما وردت في المصدر (المستودع أعلاه). */
+export type Dhikr = {
+  order: number;
+  content: string;
+  count: number;
+  count_description: string;
+  fadl: string;
+  source: string;
+  /** 0 = عام، 1 = صباح، 2 = مساء (القيم الفعلية في المصدر). */
+  type: number;
+  audio: string;
+  hadith_text: string;
+  explanation_of_hadith_vocabulary: string;
+};

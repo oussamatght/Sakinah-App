@@ -1,5 +1,12 @@
 import React, { useMemo, useState } from "react";
-import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import {
+  Linking,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 
@@ -12,15 +19,28 @@ import {
 } from "@/components/ui";
 import { radii, spacing, typography } from "@/constants/tokens";
 import { useColors } from "@/hooks/useColors";
-import { useLibraryAuthor, useLibraryBookDetails } from "@/hooks/useIslamicBooks";
-import { bookSourceLabel, parseBookSource, providerCapabilities } from "@/lib/books";
-import type { IslamicBookChapter, IslamicLibrarySource } from "@/lib/books/types";
+import {
+  useLibraryAuthor,
+  useLibraryBookDetails,
+} from "@/hooks/useIslamicBooks";
+import {
+  bookSourceLabel,
+  parseBookSource,
+  providerCapabilities,
+} from "@/lib/books";
+import type {
+  IslamicBookChapter,
+  IslamicLibrarySource,
+} from "@/lib/books/types";
 
 /** فهرس تراث قد يبلغ آلاف العناوين — نعرض دفعة ونطلب المزيد بالضغط. */
 const CHAPTERS_STEP = 25;
 
 function toArabicDigits(value: number | string): string {
-  return String(value).replace(/[0-9]/g, (digit) => "٠١٢٣٤٥٦٧٨٩"[Number(digit)]);
+  return String(value).replace(
+    /[0-9]/g,
+    (digit) => "٠١٢٣٤٥٦٧٨٩"[Number(digit)],
+  );
 }
 
 function sourceLabel(source: IslamicLibrarySource): string {
@@ -73,7 +93,10 @@ export default function BookDetails() {
     () => (chapters ?? []).slice(0, chapterLimit),
     [chapters, chapterLimit],
   );
-  const remainingChapters = Math.max(0, (chapters?.length ?? 0) - visibleChapters.length);
+  const remainingChapters = Math.max(
+    0,
+    (chapters?.length ?? 0) - visibleChapters.length,
+  );
 
   const openUrl = async (url: string | undefined) => {
     if (!url) return;
@@ -134,7 +157,10 @@ export default function BookDetails() {
           onRetry={() => void detailsQuery.refetch()}
         />
       ) : null}
-      {!missingParams && !detailsQuery.isPending && !detailsQuery.isError && !book ? (
+      {!missingParams &&
+      !detailsQuery.isPending &&
+      !detailsQuery.isError &&
+      !book ? (
         <ErrorState
           message="تعذّر عرض هذا الكتاب من المصدر المحدد."
           onRetry={() => void detailsQuery.refetch()}
@@ -157,7 +183,9 @@ export default function BookDetails() {
                   styles.bookIcon,
                   {
                     backgroundColor:
-                      book.source === "turath" ? colors.accent : colors.secondary,
+                      book.source === "turath"
+                        ? colors.accent
+                        : colors.secondary,
                   },
                 ]}>
                 <Feather name="book-open" size={22} color={colors.primary} />
@@ -170,7 +198,10 @@ export default function BookDetails() {
 
                 {book.author ? (
                   <Text
-                    style={[styles.bookAuthor, { color: colors.mutedForeground }]}>
+                    style={[
+                      styles.bookAuthor,
+                      { color: colors.mutedForeground },
+                    ]}>
                     {book.author}
                   </Text>
                 ) : null}
@@ -185,13 +216,18 @@ export default function BookDetails() {
                     backgroundColor: colors.primary,
                   },
                 ]}>
-                <Text style={[styles.sourceBadgeText, { color: colors.primaryForeground }]}>
+                <Text
+                  style={[
+                    styles.sourceBadgeText,
+                    { color: colors.primaryForeground },
+                  ]}>
                   {sourceLabel(book.source)}
                 </Text>
               </View>
 
               {typeof book.pages === "number" ? (
-                <Text style={[styles.pagesNote, { color: colors.mutedForeground }]}>
+                <Text
+                  style={[styles.pagesNote, { color: colors.mutedForeground }]}>
                   {toArabicDigits(book.pages)} صفحة
                 </Text>
               ) : null}
@@ -207,7 +243,8 @@ export default function BookDetails() {
               ]}>
               <View style={styles.sectionHead}>
                 <Feather name="bookmark" size={16} color={colors.primary} />
-                <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
+                <Text
+                  style={[styles.sectionTitle, { color: colors.foreground }]}>
                   عن الكتاب
                 </Text>
               </View>
@@ -221,30 +258,14 @@ export default function BookDetails() {
               تراث → قراءة داخل التطبيق + فهرس + فتح المصدر.
               إسلام هاوس → تحميل PDF + المرفقات + فتح المصدر. */}
           <View style={styles.actions}>
-            {canRead ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="بدء القراءة"
-                onPress={() => openReader(1)}
-                style={({ pressed }) => [
-                  styles.primaryButton,
-                  {
-                    backgroundColor: colors.primary,
-                    opacity: pressed ? 0.72 : 1,
-                  },
-                ]}>
-                <Feather name="book-open" size={19} color={colors.primaryForeground} />
-                <Text style={[styles.primaryText, { color: colors.primaryForeground }]}>
-                  ابدأ القراءة
-                </Text>
-              </Pressable>
-            ) : null}
-
-            {capabilities.canDownload && book.attachments?.length ? (
+            {capabilities.canDownload &&
+            (book.attachments?.length || book.downloadUrl) ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="تحميل ملف الكتاب"
-                onPress={() => openUrl(book.attachments?.[0].url)}
+                onPress={() =>
+                  openUrl(book.attachments?.[0].url ?? book.downloadUrl)
+                }
                 style={({ pressed }) => [
                   styles.secondaryButton,
                   {
@@ -273,7 +294,11 @@ export default function BookDetails() {
                     opacity: pressed ? 0.72 : 1,
                   },
                 ]}>
-                <Feather name="external-link" size={19} color={colors.primary} />
+                <Feather
+                  name="external-link"
+                  size={19}
+                  color={colors.primary}
+                />
                 <Text style={[styles.secondaryText, { color: colors.primary }]}>
                   فتح المصدر
                 </Text>
@@ -286,7 +311,8 @@ export default function BookDetails() {
                   styles.card,
                   { backgroundColor: colors.card, borderColor: colors.border },
                 ]}>
-                <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
+                <Text
+                  style={[styles.sectionTitle, { color: colors.foreground }]}>
                   الفهرس
                 </Text>
                 {visibleChapters.map((chapter: IslamicBookChapter, index) => (
@@ -300,15 +326,23 @@ export default function BookDetails() {
                       styles.chapterRow,
                       { opacity: pressed ? 0.65 : 1 },
                     ]}>
-                    <Text style={[styles.chapterPage, { color: colors.primary }]}>
+                    <Text
+                      style={[styles.chapterPage, { color: colors.primary }]}>
                       {toArabicDigits(chapter.page)}
                     </Text>
                     <Text
                       numberOfLines={1}
-                      style={[styles.chapterTitle, { color: colors.foreground }]}>
+                      style={[
+                        styles.chapterTitle,
+                        { color: colors.foreground },
+                      ]}>
                       {chapter.title}
                     </Text>
-                    <Feather name="chevron-left" size={16} color={colors.mutedForeground} />
+                    <Feather
+                      name="chevron-left"
+                      size={16}
+                      color={colors.mutedForeground}
+                    />
                   </Pressable>
                 ))}
 
@@ -345,7 +379,8 @@ export default function BookDetails() {
               ]}>
               <View style={styles.sectionHead}>
                 <Feather name="user" size={16} color={colors.primary} />
-                <Text style={[styles.sectionTitle, { color: colors.foreground }]}>
+                <Text
+                  style={[styles.sectionTitle, { color: colors.foreground }]}>
                   عن المؤلف
                 </Text>
               </View>
@@ -379,7 +414,10 @@ export default function BookDetails() {
                   <View style={styles.attachmentCopy}>
                     <Text
                       numberOfLines={1}
-                      style={[styles.attachmentTitle, { color: colors.foreground }]}>
+                      style={[
+                        styles.attachmentTitle,
+                        { color: colors.foreground },
+                      ]}>
                       {attachment.title ?? "ملف الكتاب"}
                     </Text>
                     <Text
@@ -387,10 +425,16 @@ export default function BookDetails() {
                         styles.attachmentMeta,
                         { color: colors.mutedForeground },
                       ]}>
-                      {[attachment.size, attachment.type].filter(Boolean).join(" • ")}
+                      {[attachment.size, attachment.type]
+                        .filter(Boolean)
+                        .join(" • ")}
                     </Text>
                   </View>
-                  <Feather name="download" size={16} color={colors.mutedForeground} />
+                  <Feather
+                    name="download"
+                    size={16}
+                    color={colors.mutedForeground}
+                  />
                 </Pressable>
               ))}
             </View>
@@ -398,12 +442,14 @@ export default function BookDetails() {
 
           {/* سياسة المصدر المذكورة حرفيًا — لا نعدّل النص */}
           {book.source === "islamhouse" ? (
-            <Text style={[styles.attribution, { color: colors.mutedForeground }]}>
+            <Text
+              style={[styles.attribution, { color: colors.mutedForeground }]}>
               النص من إسلام هاوس؛ مسموح التحميل والتخزين مع الإشارة إلى المصدر
               وعدم تغيير النص.
             </Text>
           ) : (
-            <Text style={[styles.attribution, { color: colors.mutedForeground }]}>
+            <Text
+              style={[styles.attribution, { color: colors.mutedForeground }]}>
               النص من مكتبة تراث؛ القراءة داخل التطبيق فقط.
             </Text>
           )}

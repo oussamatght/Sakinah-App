@@ -1,5 +1,6 @@
 export * from "./client";
 export * from "./wird";
+export * from "./adhkar";
 export * from "./favorites";
 export * from "./readingPosition";
 export * from "./settings";

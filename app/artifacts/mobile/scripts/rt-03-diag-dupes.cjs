@@ -15,16 +15,24 @@ const H = require("./runtime-harness.cjs");
     await H.sleep(6000);
 
     // Track request->response pairing by url + ordinal.
+    // نمرّر على مصادر الكتب الثلاثة (بما فيها islamic.app) وإلا بدا المشهد
+    // كأن islamicapp لا يُطلب أصلًا.
+    const BOOKS_API_RE = /api\.turath\.io|api3\.islamhouse\.com|api\.islamic\.app/;
+    const shortUrl = (u) =>
+      u
+        .replace("https://api.turath.io", "TURATH")
+        .replace("https://api3.islamhouse.com/v3/paV29H2gm56kvLPy", "IH")
+        .replace("https://api.islamic.app/v1/library", "IA");
     const pairs = [];
     page.on("response", (res) => {
       const u = res.url();
-      if (!/api\.turath\.io|api3\.islamhouse\.com/.test(u)) return;
+      if (!BOOKS_API_RE.test(u)) return;
       pairs.push({ status: res.status(), url: u, at: Date.now() });
     });
     const failed = [];
     page.on("requestfailed", (req) => {
       const u = req.url();
-      if (!/api\.turath\.io|api3\.islamhouse\.com/.test(u)) return;
+      if (!BOOKS_API_RE.test(u)) return;
       failed.push({ url: u, err: req.failure()?.errorText, at: Date.now() });
     });
 
@@ -57,10 +65,7 @@ const H = require("./runtime-harness.cjs");
     ].sort((a, b) => a.at - b.at);
     all.forEach((e) =>
       console.log(
-        `  +${String(e.at).padStart(6)}ms ${e.kind.padEnd(8)} ${e.url
-          .replace("https://api.turath.io", "TURATH")
-          .replace("https://api3.islamhouse.com/v3/paV29H2gm56kvLPy", "IH")
-          .slice(0, 110)}`,
+        `  +${String(e.at).padStart(6)}ms ${e.kind.padEnd(8)} ${shortUrl(e.url).slice(0, 110)}`,
       ),
     );
 
@@ -78,7 +83,7 @@ const H = require("./runtime-harness.cjs");
     }
     for (const [u, c] of succ) {
       const tag = c > 1 ? `  <-- ${c}x` : "";
-      console.log(`   ${c}x ${u.replace("https://api.turath.io", "TURATH").replace("https://api3.islamhouse.com/v3/paV29H2gm56kvLPy", "IH").slice(0, 110)}${tag}`);
+      console.log(`   ${c}x ${shortUrl(u).slice(0, 110)}${tag}`);
     }
     console.log(`\ngenuine successful duplicate fetches: ${dupes}`);
   } finally {

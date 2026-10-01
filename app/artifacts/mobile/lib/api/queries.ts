@@ -53,6 +53,7 @@ import {
   storeLocalTafsir,
 } from "../offline/quranDb";
 import { storeHadiths } from "../offline/hadithDb";
+import { normalizeArabic } from "../arabic";
 import {
   getPrayerTimesCache,
   savePrayerTimesCache,
@@ -610,19 +611,16 @@ export type QuranSearchHit = {
   ayahScore: number;
 };
 
-const SEARCH_TASHKEEL = /[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u0640]/g;
-
 /**
  * Normalizes Uthmani script to plain Arabic for search: strips tashkeel and
  * folds alef-wasla (ٱ) / hamza carriers into plain alef so a user typing
  * "الصمد" matches "ٱلصَّمَدُ".
+ *
+ * التطبيع نفسه الآن في lib/arabic.ts ويستخدمه بحث الأذكار أيضًا، فصار
+ * المؤلف الوحيد واحدًا (كان هنا نسخة خاصة وبحث المصحف يختلف عن غيره).
  */
 function normalizeForSearch(text: string): string {
-  return text
-    .replace(SEARCH_TASHKEEL, "")
-    .replace(/[ٱأإآ]/g, "ا")
-    .replace(/ى/g, "ي")
-    .replace(/ة/g, "ه");
+  return normalizeArabic(text);
 }
 
 export function useQuranSearch(): (query: string) => QuranSearchHit[] {

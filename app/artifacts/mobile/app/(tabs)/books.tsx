@@ -48,16 +48,25 @@ const EMPTY_ADVANCED: AdvancedSearchValue = {
   source: "all",
 };
 
-/** الفعل المتاح للبطاقة — مشتق من قدرات المصدر، لا من تخمين. */
+/**
+ * الفعل المتاح للبطاقة — من قدرات المصدر **وحالة الكتاب نفسه** معًا.
+ * كان ينظر لقدرة المصدر وحدها: كتب إسلاميك PDF-only (has_text=false)
+ * كانت تعرض «قراءة» على البطاقة ثم بلا زر «ابدأ القراءة» في التفاصيل
+ * ⇒ المستخدم يضغط فيجد لا شيء للقراءة.
+ */
 function actionLabelFor(book: IslamicBook): string {
   const capabilities = providerCapabilities(book.source);
-  if (capabilities.canReadByPage) return "قراءة";
-  if (capabilities.canDownload && book.attachments?.length) return "PDF";
+  if (capabilities.canReadByPage && book.hasText !== false) return "قراءة";
+  if (capabilities.canDownload && (book.attachments?.length || book.downloadUrl))
+    return "PDF";
   return "تفاصيل";
 }
 
 function toArabicDigits(value: number | string): string {
-  return String(value).replace(/[0-9]/g, (digit) => "٠١٢٣٤٥٦٧٨٩"[Number(digit)]);
+  return String(value).replace(
+    /[0-9]/g,
+    (digit) => "٠١٢٣٤٥٦٧٨٩"[Number(digit)],
+  );
 }
 
 export default function BooksTab() {
@@ -148,14 +157,22 @@ export default function BooksTab() {
   });
 
   // البحث المتقدم يتفوّق على البحث البسيط عند تطبيق فلاتر.
-  const books = advancedActive ? (advancedQuery.data?.items ?? []) : (listQuery.data?.items ?? []);
+  const books = advancedActive
+    ? (advancedQuery.data?.items ?? [])
+    : (listQuery.data?.items ?? []);
   const activeQuery = advancedActive ? advancedQuery : listQuery;
 
   const reportedTotal = Number(activeQuery.data?.total ?? 0);
-  const reportedPerPage = Math.max(1, Number(activeQuery.data?.perPage ?? PAGE_SIZE));
+  const reportedPerPage = Math.max(
+    1,
+    Number(activeQuery.data?.perPage ?? PAGE_SIZE),
+  );
   const reportedTotalPages = Math.max(
     0,
-    Number((activeQuery.data as { totalPages?: number } | undefined)?.totalPages ?? 0),
+    Number(
+      (activeQuery.data as { totalPages?: number } | undefined)?.totalPages ??
+        0,
+    ),
   );
   const totalPages =
     reportedTotalPages > 0
@@ -171,7 +188,8 @@ export default function BooksTab() {
       ? true
       : explicitHasMore === false
         ? false
-        : (advancedActive ? advancedPage : page) < totalPages || inferredHasMore;
+        : (advancedActive ? advancedPage : page) < totalPages ||
+          inferredHasMore;
 
   const currentPage = advancedActive ? advancedPage : page;
   const goToPage = (next: number) => {
@@ -181,7 +199,8 @@ export default function BooksTab() {
   };
 
   const canGoPrevious = currentPage > 1 && !activeQuery.isPending;
-  const canGoNext = !activeQuery.isPending && !activeQuery.isFetching && hasMore;
+  const canGoNext =
+    !activeQuery.isPending && !activeQuery.isFetching && hasMore;
 
   // جلب صفحة النتائج التالية فقط — لا يُطلق طلبًا إضافيًا عند فتحها لاحقًا.
   usePrefetchNextAdvancedSearchPage({
@@ -247,7 +266,9 @@ export default function BooksTab() {
           },
         ]}>
         <Feather name="chevron-right" size={17} color={colors.primary} />
-        <Text style={[styles.pagerText, { color: colors.primary }]}>السابق</Text>
+        <Text style={[styles.pagerText, { color: colors.primary }]}>
+          السابق
+        </Text>
       </Pressable>
 
       <View
@@ -272,7 +293,9 @@ export default function BooksTab() {
             opacity: !canGoNext ? 0.4 : pressed ? 0.7 : 1,
           },
         ]}>
-        <Text style={[styles.pagerText, { color: colors.primary }]}>التالي</Text>
+        <Text style={[styles.pagerText, { color: colors.primary }]}>
+          التالي
+        </Text>
         <Feather name="chevron-left" size={17} color={colors.primary} />
       </Pressable>
     </View>
@@ -317,7 +340,13 @@ export default function BooksTab() {
             accessibilityLabel={`تصفح ${category.title}`}
             onPress={() =>
               setSelectedCategory(
-                selected ? null : { source: category.source, id: category.id, title: category.title },
+                selected
+                  ? null
+                  : {
+                      source: category.source,
+                      id: category.id,
+                      title: category.title,
+                    },
               )
             }
             style={[
@@ -350,9 +379,7 @@ export default function BooksTab() {
           <BookCard
             book={item}
             onPress={() => openBook(item)}
-            categoryTitle={
-              advancedActive ? undefined : selectedCategoryTitle
-            }
+            categoryTitle={advancedActive ? undefined : selectedCategoryTitle}
             actionLabel={actionLabelFor(item)}
           />
         )}
@@ -363,13 +390,17 @@ export default function BooksTab() {
         ]}
         ListHeaderComponent={
           <View>
-            <AppHeader eyebrow="من المكتبة الإسلامية" title="الكتب" />
+            <AppHeader
+              eyebrow="من المكتبة الإسلامية"
+              title="الكتب"
+              action="sliders"
+              actionLabel="الإعدادات"
+              onAction={() => router.push("/settings")}
+            />
 
             <SearchBar
               placeholder={
-                searching
-                  ? "ابحث في تراث وإسلام هاوس…"
-                  : "ابحث في شجرة الكتب…"
+                searching ? "ابحث في تراث وإسلام هاوس…" : "ابحث في شجرة الكتب…"
               }
               value={search}
               onChangeText={setSearch}
@@ -393,7 +424,9 @@ export default function BooksTab() {
               <Feather
                 name="sliders"
                 size={16}
-                color={advancedActive ? colors.primaryForeground : colors.primary}
+                color={
+                  advancedActive ? colors.primaryForeground : colors.primary
+                }
               />
               <Text
                 style={[
@@ -441,9 +474,13 @@ export default function BooksTab() {
             {!advancedActive && !searching ? (
               <>
                 {renderCategories()}
-                {islamHouseBranchesQuery.isError && islamicAppGenresQuery.isError ? (
+                {islamHouseBranchesQuery.isError &&
+                islamicAppGenresQuery.isError ? (
                   <Text
-                    style={[styles.scopeNote, { color: colors.mutedForeground }]}>
+                    style={[
+                      styles.scopeNote,
+                      { color: colors.mutedForeground },
+                    ]}>
                     تعذر تحميل التصنيفات — يمكنك تصفح قائمة الكتب مباشرة.
                   </Text>
                 ) : null}

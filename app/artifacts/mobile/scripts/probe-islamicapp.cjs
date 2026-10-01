@@ -73,6 +73,43 @@ async function j(url) {
   const al = authors.json?.data?.authors ?? [];
   check("authors list works", al.length > 0, `total=${authors.json?.data?.total}`);
 
+  // القراءة داخل التطبيق: /text يجب أن يعطي فصولًا بنصّ وصفحات.
+  // (هذا ما يجعل «ابدأ القراءة» يعمل لمصدر إسلاميك.)
+  log("\n=== reading: /text drives in-app pages ===");
+  let textSlug = null;
+  for (let off = 0; off < 600 && !textSlug; off += 50) {
+    const page = await j(`${LIB}/books?limit=50&offset=${off}`);
+    const rows = page.json?.data?.books ?? [];
+    const withText = rows.find((b) => b.has_text);
+    if (withText) textSlug = withText.slug;
+  }
+  if (textSlug) {
+    const t = await j(`${LIB}/books/${encodeURIComponent(textSlug)}/text`);
+    const d = t.json?.data;
+    const sections = (d?.chapters ?? []).filter((c) => c && c.text);
+    check("GET /text returns 200 with pageCount", typeof d?.pageCount === "number",
+      `slug=${textSlug} pageCount=${d?.pageCount}`);
+    check("/text sections have readable text", sections.length > 0,
+      `${sections.length} sections`);
+    const pages = sections.map((c) => c.page).filter((p) => Number.isFinite(p) && p > 0);
+    check("/text sections carry page numbers", pages.length === sections.length,
+      `pages=${pages.slice(0, 8).join(",")}`);
+    const titled = sections.filter((c) => String(c.title ?? "").trim()).length;
+    log(`    (info) sections with explicit title: ${titled}/${sections.length}` +
+      ` — الفارغة تأخذ أول سطر من النص كعنوان`);
+    // الصفحة المطلوبة تقع داخل الفصل لا عند بدايته بالضبط (صفحات متفرّقة).
+    if (pages.length >= 2) {
+      const first = pages[0];
+      const second = pages[1];
+      const containing = [...pages].reverse().find((p) => p <= first + 1) ?? first;
+      check("page lookup resolves a containing section",
+        containing <= first + 1 && containing <= second,
+        `page ${first} -> section page ${containing}, next section ${second}`);
+    }
+  } else {
+    check("GET /text returns 200 with pageCount", false, "no has_text book found");
+  }
+
   log("\n=== source isolation: failing source must not kill healthy ones ===");
   // نقيس أن Promise.all المغلّف لا يعيد الجلب: نغلق تراث ونطلب البحث مرتين.
   log("  (verified in-app via the network probe; see runtime-harness counts)");

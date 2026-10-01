@@ -1,20 +1,20 @@
-import React from 'react';
+import React from "react";
 
-import { Platform, StyleSheet, useColorScheme, View } from 'react-native';
+import { Platform, StyleSheet, useColorScheme, View } from "react-native";
 
-import { useColors } from '@/hooks/useColors';
+import { useColors } from "@/hooks/useColors";
 
-import { Feather } from '@expo/vector-icons';
+import { Feather } from "@expo/vector-icons";
 
-import { BlurView } from 'expo-blur';
+import { BlurView } from "expo-blur";
 
-import { isLiquidGlassAvailable } from 'expo-glass-effect';
+import { isLiquidGlassAvailable } from "expo-glass-effect";
 
-import { Tabs } from 'expo-router';
+import { Tabs } from "expo-router";
 
-import { NativeTabs } from 'expo-router/unstable-native-tabs';
+import { NativeTabs } from "expo-router/unstable-native-tabs";
 
-import { SymbolView } from 'expo-symbols';
+import { SymbolView } from "expo-symbols";
 
 // IMPORTANT:
 // iOS 26 uses NativeTabs for native tabs with Liquid Glass support.
@@ -29,43 +29,50 @@ function NativeTabLayout() {
     <NativeTabs>
       <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Icon
-          sf={{ default: 'house', selected: 'house.fill' }}
+          sf={{ default: "house", selected: "house.fill" }}
         />
         <NativeTabs.Trigger.Label>الرئيسية</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="quran">
         <NativeTabs.Trigger.Icon
-          sf={{ default: 'book.closed', selected: 'book.closed.fill' }}
+          sf={{ default: "book.closed", selected: "book.closed.fill" }}
         />
         <NativeTabs.Trigger.Label>القرآن</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="prayer">
         <NativeTabs.Trigger.Icon
-          sf={{ default: 'clock', selected: 'clock.fill' }}
+          sf={{ default: "clock", selected: "clock.fill" }}
         />
         <NativeTabs.Trigger.Label>الصلاة</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="tasbih">
         <NativeTabs.Trigger.Icon
-          sf={{ default: 'circle.circle', selected: 'circle.circle.fill' }}
+          sf={{ default: "circle.circle", selected: "circle.circle.fill" }}
         />
         <NativeTabs.Trigger.Label>التسبيح</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="hadith">
         <NativeTabs.Trigger.Icon
-          sf={{ default: 'text.quote', selected: 'text.quote' }}
+          sf={{ default: "text.quote", selected: "text.quote" }}
         />
         <NativeTabs.Trigger.Label>الأحاديث</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="dhikr">
+        <NativeTabs.Trigger.Icon
+          sf={{ default: "sparkles", selected: "sparkles" }}
+        />
+        <NativeTabs.Trigger.Label>الأذكار</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
       {/* NEW: Islamic Books */}
       <NativeTabs.Trigger name="books">
         <NativeTabs.Trigger.Icon
-          sf={{ default: 'books.vertical', selected: 'books.vertical.fill' }}
+          sf={{ default: "books.vertical", selected: "books.vertical.fill" }}
         />
         <NativeTabs.Trigger.Label>الكتب</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
@@ -76,9 +83,9 @@ function NativeTabLayout() {
 function ClassicTabLayout() {
   const colors = useColors();
   const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
-  const isIOS = Platform.OS === 'ios';
-  const isWeb = Platform.OS === 'web';
+  const isDark = colorScheme === "dark";
+  const isIOS = Platform.OS === "ios";
+  const isWeb = Platform.OS === "web";
 
   return (
     <Tabs
@@ -87,8 +94,8 @@ function ClassicTabLayout() {
         tabBarInactiveTintColor: colors.mutedForeground,
         headerShown: false,
         tabBarStyle: {
-          position: 'absolute',
-          backgroundColor: isIOS ? 'transparent' : colors.background,
+          position: "absolute",
+          backgroundColor: isIOS ? "transparent" : colors.background,
           borderTopWidth: isWeb ? 1 : 0,
           borderTopColor: colors.border,
           elevation: 0,
@@ -98,7 +105,7 @@ function ClassicTabLayout() {
           isIOS ? (
             <BlurView
               intensity={100}
-              tint={isDark ? 'dark' : 'light'}
+              tint={isDark ? "dark" : "light"}
               style={StyleSheet.absoluteFill}
             />
           ) : isWeb ? (
@@ -109,12 +116,11 @@ function ClassicTabLayout() {
               ]}
             />
           ) : null,
-      }}
-    >
+      }}>
       <Tabs.Screen
         name="index"
         options={{
-          title: 'الرئيسية',
+          title: "الرئيسية",
           tabBarIcon: ({ color }) =>
             isIOS ? (
               <SymbolView name="house" tintColor={color} size={24} />
@@ -127,7 +133,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="quran"
         options={{
-          title: 'القرآن',
+          title: "القرآن",
           tabBarIcon: ({ color }) =>
             isIOS ? (
               <SymbolView name="book.closed" tintColor={color} size={22} />
@@ -140,7 +146,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="prayer"
         options={{
-          title: 'الصلاة',
+          title: "الصلاة",
           tabBarIcon: ({ color }) =>
             isIOS ? (
               <SymbolView name="clock" tintColor={color} size={22} />
@@ -153,7 +159,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="tasbih"
         options={{
-          title: 'التسبيح',
+          title: "التسبيح",
           tabBarIcon: ({ color }) =>
             isIOS ? (
               <SymbolView name="circle.circle" tintColor={color} size={22} />
@@ -166,7 +172,7 @@ function ClassicTabLayout() {
       <Tabs.Screen
         name="hadith"
         options={{
-          title: 'الأحاديث',
+          title: "الأحاديث",
           tabBarIcon: ({ color }) =>
             isIOS ? (
               <SymbolView name="text.quote" tintColor={color} size={22} />
@@ -176,18 +182,27 @@ function ClassicTabLayout() {
         }}
       />
 
+      <Tabs.Screen
+        name="dhikr"
+        options={{
+          title: "الأذكار",
+          tabBarIcon: ({ color }) =>
+            isIOS ? (
+              <SymbolView name="sparkles" tintColor={color} size={22} />
+            ) : (
+              <Feather name="sun" size={21} color={color} />
+            ),
+        }}
+      />
+
       {/* NEW: Islamic Books */}
       <Tabs.Screen
         name="books"
         options={{
-          title: 'الكتب',
+          title: "الكتب",
           tabBarIcon: ({ color }) =>
             isIOS ? (
-              <SymbolView
-                name="books.vertical"
-                tintColor={color}
-                size={22}
-              />
+              <SymbolView name="books.vertical" tintColor={color} size={22} />
             ) : (
               <Feather name="book" size={21} color={color} />
             ),
@@ -200,12 +215,12 @@ function ClassicTabLayout() {
 export default function TabLayout() {
   let nativeTabsAvailable = false;
 
-  if (Platform.OS === 'ios') {
+  if (Platform.OS === "ios") {
     try {
       nativeTabsAvailable = isLiquidGlassAvailable();
     } catch (error) {
       if (__DEV__) {
-        console.error('Native liquid glass tabs are unavailable:', error);
+        console.error("Native liquid glass tabs are unavailable:", error);
       }
     }
   }
@@ -217,4 +232,4 @@ export default function TabLayout() {
   return <ClassicTabLayout />;
 }
 
-export { RouteErrorBoundary as ErrorBoundary } from '@/components/RouteErrorBoundary';
+export { RouteErrorBoundary as ErrorBoundary } from "@/components/RouteErrorBoundary";

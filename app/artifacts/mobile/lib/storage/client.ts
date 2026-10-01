@@ -44,4 +44,8 @@ export const storageKeys = {
   settings: "settings.v1",
   tasbih: "tasbih.history.v1",
   prayerTimes: "prayer.times.cache.v1",
+  /** أذكار: تقدّم عدّاد اليوم + هدف الورد اليومي + سجلّ اليوم. */
+  adhkarProgress: "adhkar.daily.v1",
+  adhkarWirdGoal: "adhkar.wird.goal.v1",
+  adhkarWirdDay: "adhkar.wird.day.v1",
 } as const;

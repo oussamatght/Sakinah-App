@@ -7,8 +7,10 @@ const CHROME = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const OUT = "C:\\Users\\LENOVO\\AppData\\Local\\Temp\\opencode\\runtime";
 if (!fs.existsSync(OUT)) fs.mkdirSync(OUT, { recursive: true });
 
+// مصادر خارجية معروفة: أي طلب إليها يُسجَّل (حتى نتحقّق من "طلب واحد فقط"
+// ومن عدم تكرار الجلب). raw.githubusercontent.com = مصدر الأذكار.
 const API_RE =
-  /api\.turath\.io|api3\.islamhouse\.com|api\.islamic\.app|api\.hadeethenc|hadis-api-id|api\.quran|alquran\.cloud|quran\.com|api\.adhan|times\.api|fawaz/i;
+  /api\.turath\.io|api3\.islamhouse\.com|api\.islamic\.app|api\.hadeethenc|hadis-api-id|api\.quran|alquran\.cloud|quran\.com|api\.adhan|times\.api|fawaz|raw\.githubusercontent/i;
 
 const state = { phase: "boot", log: [], seq: 0, console: [] };
 

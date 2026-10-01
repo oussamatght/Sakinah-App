@@ -451,6 +451,122 @@ export function DailyVerse() {
   );
 }
 
+/**
+ * بطاقة "ذكر اليوم" على الشاشة الرئيسية.
+ *
+ * تعرض ذكرًا حقيقيًا من المصدر (`text`) لا نصًّا موضوعًا. فإذا لم يصل
+ * المحتوى بعد (أو فشل) تبقى العبارة التعريفية بدل فراغ أو نص مخترع.
+ */
+export function DailyDhikr({
+  onPress,
+  text,
+  meta,
+  eyebrow = "ذكر اليوم",
+  hint = "ذكر الله وطمأنينة القلب",
+}: {
+  onPress: () => void;
+  /** نصّ الذكر كما ورد في المصدر. */
+  text?: string;
+  /** سطر ثانوي صغير تحت العنوان (مثل تصنيف الذكر). */
+  meta?: string;
+  eyebrow?: string;
+  hint?: string;
+}) {
+  const colors = useColors();
+  const { settings } = useSettings();
+  const dhikrFontSize = typography.quranMedium * settings.fontScale;
+
+  return (
+    <Pressable
+      testID="daily-dhikr"
+      accessibilityRole="button"
+      accessibilityLabel="فتح الأذكار"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.dailyCard,
+        {
+          backgroundColor: colors.accent,
+          borderColor: colors.border,
+          opacity: pressed ? 0.85 : 1,
+        },
+      ]}
+    >
+      <View style={styles.dailyHeader}>
+        <View style={styles.dailyTitleRow}>
+          <View
+            style={[
+              styles.dailyIcon,
+              { backgroundColor: colors.secondary },
+            ]}
+          >
+            <Feather
+              name="sun"
+              size={15}
+              color={colors.primary}
+            />
+          </View>
+
+          <View>
+            <Text
+              style={[
+                styles.eyebrow,
+                { color: colors.primary },
+              ]}
+            >
+              {eyebrow}
+            </Text>
+
+            <Text
+              style={[
+                styles.dailyHint,
+                { color: colors.mutedForeground },
+              ]}
+            >
+              {meta ?? hint}
+            </Text>
+          </View>
+        </View>
+
+        <Feather
+          name="chevron-left"
+          size={20}
+          color={colors.mutedForeground}
+        />
+      </View>
+
+      <Text
+        numberOfLines={4}
+        style={[
+          styles.verse,
+          {
+            color: colors.foreground,
+            fontSize: dhikrFontSize,
+            lineHeight: Math.round(dhikrFontSize * 1.85),
+          },
+        ]}
+      >
+        {text ?? "افتح الأذكار لقراءة أذكار الصباح والمساء"}
+      </Text>
+
+      <View style={styles.verseFooter}>
+        <Text
+          style={[
+            styles.verseSource,
+            { color: colors.mutedForeground },
+          ]}
+        >
+          أذكار ثابتة من مصدر الأذكار
+        </Text>
+
+        <Feather
+          name="arrow-left"
+          size={15}
+          color={colors.mutedForeground}
+        />
+      </View>
+    </Pressable>
+  );
+}
 export function SearchBar({
   placeholder,
   value,

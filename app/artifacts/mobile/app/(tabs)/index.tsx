@@ -4,6 +4,7 @@ import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import {
   DailyVerse,
+  DailyDhikr,
   IconButton,
   PrayerCard,
   QuickAction,
@@ -14,12 +15,16 @@ import {
 import { spacing, typography } from "@/constants/tokens";
 import { useColors } from "@/hooks/useColors";
 import { useResumeReading } from "@/hooks/useResumeReading";
+import { categoryLabel, dailyAdhkar, useGetAdhkar } from "@/hooks/useAdhkar";
 
 export default function HomeScreen() {
   const colors = useColors();
   const router = useRouter();
   // "أكمل وردك" — آخر موضع محفوظ، أو الفاتحة عند أول استخدام (بلا فتح فاشل)
   const resume = useResumeReading();
+  // ذكر اليوم: من المصدر مباشرة، وثابت طوال اليوم (لا يتبدّل كل فتح للشاشة).
+  const { data: adhkar } = useGetAdhkar();
+  const todayDhikr = dailyAdhkar(adhkar ?? []);
   const openResume = () => {
     const target = resume ?? {
       surahId: 1,
@@ -110,6 +115,11 @@ export default function HomeScreen() {
           label="القبلة"
           onPress={() => router.push("/qibla")}
         />
+        <QuickAction
+          icon="message-circle"
+          label=" الأذكار الصباحية والمسائية"
+          onPress={() => router.push("/dhikr")}
+        />
       </ScrollView>
 
       <SectionTitle
@@ -119,8 +129,20 @@ export default function HomeScreen() {
       />
       <ReadingCard onPress={openResume} />
 
-      <SectionTitle title="من وحي اليوم" />
-      <DailyVerse />
+      <SectionTitle title="ذكر اليوم" />
+      <DailyDhikr
+        onPress={() =>
+          todayDhikr
+            ? router.push({
+                pathname: "/dhikr-practice",
+                params: { order: String(todayDhikr.order) },
+              })
+            : router.push("/dhikr")
+        }
+        text={todayDhikr?.content}
+        eyebrow={todayDhikr ? categoryLabel(todayDhikr) : "ذكر اليوم"}
+        meta={todayDhikr ? todayDhikr.count_description : undefined}
+      />
 
       <Pressable
         accessibilityRole="button"

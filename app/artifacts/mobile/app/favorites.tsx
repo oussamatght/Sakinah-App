@@ -52,6 +52,14 @@ export default function FavoritesScreen() {
       }
     } else if (item.kind === 'hadith') {
       router.push('/hadith-browser');
+    } else if (item.kind === 'dhikr') {
+      // refId = رقم الذكر (order) — افتحه في شاشة الذكر مع عدّاده.
+      const order = Number(item.refId);
+      if (Number.isInteger(order) && order > 0) {
+        router.push({ pathname: '/dhikr-practice', params: { order: item.refId } });
+      } else {
+        router.push('/dhikr');
+      }
     }
   };
 
@@ -104,7 +112,7 @@ export default function FavoritesScreen() {
                     <Feather name="trash-2" size={16} color={colors.mutedForeground} />
                   </Pressable>
                 </View>
-                <Pressable accessibilityRole="button" onPress={() => openItem(item)} disabled={item.kind === 'dhikr'}>
+                <Pressable accessibilityRole="button" onPress={() => openItem(item)}>
                   <Text style={[styles.cardText, { color: colors.foreground }]}>{item.text}</Text>
                 </Pressable>
                 {item.subtitle ? (

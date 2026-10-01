@@ -87,6 +87,18 @@ type BookTextBundle = {
 
 const textCache = new Map<string, Promise<BookTextBundle>>();
 
+/** عنوان الفصل: من الـ API، وإلا أول سطر من النص (مقتطف معقول). */
+function sectionTitle(row: Record<string, unknown>, text: string): string {
+  const title = (localizedText(row, "title") ?? "").trim();
+  if (title) return title;
+  const firstLine = text
+    .split("\n")
+    .map((line) => line.trim())
+    .find((line) => line.length > 0);
+  if (!firstLine) return "";
+  return firstLine.length > 70 ? `${firstLine.slice(0, 70)}…` : firstLine;
+}
+
 /**
  * يبني «خريطة صفحات» من فصول الكتاب: كل فصل يغطي [page, nextPage-1].
  * أرقام الصفحات في islamic.app **متفرّقة** (فهرس 153 فصلًا في كتاب 203 صفحات)،
@@ -127,7 +139,10 @@ async function fetchBookText(slug: string): Promise<BookTextBundle> {
       const text = str(row.text);
       if (!text) return;
       sections.push({
-        title: localizedText(row, "title") || `القسم ${index + 1}`,
+        // بعض الكتب تُرجع title فارغًا لكل الفصول (متحقَّق:
+        // akhlaq-ahl-quran ⇒ 17 فصلًا كلها بلا عنوان). وقتها أول سطر من
+        // النص هو العنوان الحقيقي، falo "القسم 7" لا يقول شيئًا للمستخدم.
+        title: sectionTitle(row, text) || `القسم ${index + 1}`,
         level: num(row.level) ?? 0,
         page: num(row.page) ?? sections.length + 1,
         text,

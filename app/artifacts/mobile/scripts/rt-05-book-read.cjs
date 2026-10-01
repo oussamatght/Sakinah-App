@@ -80,8 +80,42 @@ function consoleLines() {
     console.log("reader visible text length:", readerText.replace(/\s+/g, " ").trim().length);
 
     // انتقل «التالي»: يجب أن يظهر نصّ مختلف (لا نفس الصفحة مكرّرة).
+    // نستخدم إحداثيات BoundingBox + page.mouse لأن Pressable في RNW يستمع
+    // على pointerdown/up وليس click.
     const beforeNext = readerText.replace(/\s+/g, " ").trim();
-    await H.clickText(page, "التالي");
+    const box = await page.evaluate(() => {
+      const nodes = Array.from(
+        document.querySelectorAll('div,span,button,a,[role="button"]'),
+      );
+      const targets = nodes.filter((n) => (n.innerText || "").trim() === "التالي");
+      const clickables = targets
+        .map((n) => n.closest('[role="button"],button,a') || n)
+        .filter(Boolean);
+      // نتجاهل العناصر بأبعاد صفر (نسخ مخفية/measure-only في RNW).
+      const sized = clickables.filter((n) => {
+        const r = n.getBoundingClientRect();
+        return r.width > 4 && r.height > 4;
+      });
+      const clickable = sized[0] || clickables[0];
+      if (!clickable) return null;
+      const r = clickable.getBoundingClientRect();
+      return {
+        x: Math.round(r.x + r.width / 2),
+        y: Math.round(r.y + r.height / 2),
+        w: Math.round(r.width),
+        h: Math.round(r.height),
+        candidates: targets.length,
+        sized: sized.length,
+        tag: clickable.tagName,
+      };
+    });
+    console.log("next button box:", JSON.stringify(box));
+    if (box) {
+      await page.mouse.move(box.x, box.y);
+      await page.mouse.down();
+      await H.sleep(120);
+      await page.mouse.up();
+    }
     await H.sleep(7000);
     const afterNext = (await H.bodyText(page)).replace(/\s+/g, " ").trim();
     console.log("next-page text changed:", afterNext !== beforeNext);
