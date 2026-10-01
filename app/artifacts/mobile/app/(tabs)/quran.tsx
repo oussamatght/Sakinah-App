@@ -218,6 +218,7 @@ export default function QuranScreen() {
       {tab === "surahs" ? (
         <FlatList
           data={filtered}
+          style={styles.listViewport}
           keyExtractor={(item) => `surah-${item.id}`}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.list}
@@ -336,6 +337,7 @@ export default function QuranScreen() {
       {tab === "juz" ? (
         <FlatList
           data={juzList}
+          style={styles.listViewport}
           keyExtractor={(item) => `juz-${item.juz}`}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.list}
@@ -388,6 +390,7 @@ export default function QuranScreen() {
       {tab === "pages" ? (
         <FlatList
           data={pageList}
+          style={styles.listViewport}
           keyExtractor={(item) => `page-${item.page}`}
           showsVerticalScrollIndicator={false}
           numColumns={4}
@@ -443,6 +446,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   tabText: { fontSize: typography.bodySmall, fontWeight: "700" },
+  listViewport: { flex: 1 },
   list: { paddingBottom: spacing.lg },
   gridList: { paddingBottom: spacing.lg, paddingTop: spacing.md },
   verseResults: { gap: spacing.sm, paddingTop: spacing.lg },

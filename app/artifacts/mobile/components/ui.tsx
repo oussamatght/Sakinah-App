@@ -1,4 +1,4 @@
-import React, { PropsWithChildren } from "react";
+import React, { PropsWithChildren, useContext } from "react";
 import {
   ActivityIndicator,
   Platform,
@@ -11,6 +11,7 @@ import {
   ViewStyle,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { BottomTabBarHeightContext } from "expo-router/build/react-navigation/bottom-tabs";
 import { Feather } from "@expo/vector-icons";
 import { radii, spacing, typography } from "@/constants/tokens";
 import { useColors } from "@/hooks/useColors";
@@ -32,16 +33,21 @@ export function Screen({
 }>) {
   const colors = useColors();
   const insets = useSafeAreaInsets();
+  const tabBarHeight = useContext(BottomTabBarHeightContext) ?? 0;
 
   const paddingTop =
     Platform.OS === "web" ? Math.max(insets.top, 67) : insets.top;
-  const paddingBottom =
-    Platform.OS === "web" ? 34 : Math.max(insets.bottom, spacing.lg);
+  const paddingBottom = tabBarHeight
+    ? Math.max(tabBarHeight, insets.bottom) + spacing.md
+    : Platform.OS === "web"
+      ? 34
+      : Math.max(insets.bottom, spacing.lg);
 
   const content = (
     <View
       style={[
         styles.screenContent,
+        !scroll && styles.screenContentFill,
         { paddingTop, paddingBottom },
         contentStyle,
       ]}>
@@ -486,49 +492,26 @@ export function DailyDhikr({
           borderColor: colors.border,
           opacity: pressed ? 0.85 : 1,
         },
-      ]}
-    >
+      ]}>
       <View style={styles.dailyHeader}>
         <View style={styles.dailyTitleRow}>
           <View
-            style={[
-              styles.dailyIcon,
-              { backgroundColor: colors.secondary },
-            ]}
-          >
-            <Feather
-              name="sun"
-              size={15}
-              color={colors.primary}
-            />
+            style={[styles.dailyIcon, { backgroundColor: colors.secondary }]}>
+            <Feather name="sun" size={15} color={colors.primary} />
           </View>
 
           <View>
-            <Text
-              style={[
-                styles.eyebrow,
-                { color: colors.primary },
-              ]}
-            >
+            <Text style={[styles.eyebrow, { color: colors.primary }]}>
               {eyebrow}
             </Text>
 
-            <Text
-              style={[
-                styles.dailyHint,
-                { color: colors.mutedForeground },
-              ]}
-            >
+            <Text style={[styles.dailyHint, { color: colors.mutedForeground }]}>
               {meta ?? hint}
             </Text>
           </View>
         </View>
 
-        <Feather
-          name="chevron-left"
-          size={20}
-          color={colors.mutedForeground}
-        />
+        <Feather name="chevron-left" size={20} color={colors.mutedForeground} />
       </View>
 
       <Text
@@ -540,26 +523,16 @@ export function DailyDhikr({
             fontSize: dhikrFontSize,
             lineHeight: Math.round(dhikrFontSize * 1.85),
           },
-        ]}
-      >
+        ]}>
         {text ?? "افتح الأذكار لقراءة أذكار الصباح والمساء"}
       </Text>
 
       <View style={styles.verseFooter}>
-        <Text
-          style={[
-            styles.verseSource,
-            { color: colors.mutedForeground },
-          ]}
-        >
+        <Text style={[styles.verseSource, { color: colors.mutedForeground }]}>
           أذكار ثابتة من مصدر الأذكار
         </Text>
 
-        <Feather
-          name="arrow-left"
-          size={15}
-          color={colors.mutedForeground}
-        />
+        <Feather name="arrow-left" size={15} color={colors.mutedForeground} />
       </View>
     </Pressable>
   );
@@ -679,7 +652,9 @@ export function isOfflineError(error: unknown): boolean {
   }
   if (error instanceof TypeError) return true;
   const nav =
-    typeof navigator !== "undefined" ? (navigator as Navigator | undefined) : undefined;
+    typeof navigator !== "undefined"
+      ? (navigator as Navigator | undefined)
+      : undefined;
   if (nav && nav.onLine === false) return true;
   const message = error instanceof Error ? error.message : String(error ?? "");
   return /\b(offline|network request failed|no internet|unable to connect)\b/i.test(
@@ -744,6 +719,10 @@ const styles = StyleSheet.create({
   screenContent: {
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.xxl,
+  },
+
+  screenContentFill: {
+    flex: 1,
   },
 
   header: {

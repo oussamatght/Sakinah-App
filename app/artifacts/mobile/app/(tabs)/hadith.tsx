@@ -100,7 +100,11 @@ function HadithCard({
 
       <View style={styles.hadithMetaRow}>
         {/* الدرجة كسولًا حتى لا تُحبس القائمة، وقيمتها من المصدر بلا اختراع. */}
-        <ItemGrade item={item} bookSlug={bookSlug} showMissing={showMissingGrade} />
+        <ItemGrade
+          item={item}
+          bookSlug={bookSlug}
+          showMissing={showMissingGrade}
+        />
 
         {item.attribution ? (
           <Text
@@ -536,15 +540,11 @@ export default function HadithTab() {
   const items = activeList.data?.items ?? [];
 
   const reportedTotal = Number(activeList.data?.total ?? 0);
-  const reportedPerPage = Math.max(
-    1,
-    Number(activeList.data?.perPage ?? 10),
-  );
+  const reportedPerPage = Math.max(1, Number(activeList.data?.perPage ?? 10));
   const reportedTotalPages = Math.max(
     0,
     Number(
-      (activeList.data as { totalPages?: number } | undefined)?.totalPages ??
-        0,
+      (activeList.data as { totalPages?: number } | undefined)?.totalPages ?? 0,
     ),
   );
 
@@ -568,10 +568,7 @@ export default function HadithTab() {
 
   const canGoPrevious = page > 1 && !activeList.isPending;
 
-  const canGoNext =
-    !activeList.isPending &&
-    !activeList.isFetching &&
-    hasMore;
+  const canGoNext = !activeList.isPending && !activeList.isFetching && hasMore;
 
   const searchNumberActive =
     submittedText.trim() !== "" && searchKind === "number";
@@ -700,11 +697,7 @@ export default function HadithTab() {
             opacity: !canGoNext ? 0.35 : pressed ? 0.7 : 1,
           },
         ]}>
-        <Feather
-          name="arrow-left"
-          size={20}
-          color={colors.primaryForeground}
-        />
+        <Feather name="arrow-left" size={20} color={colors.primaryForeground} />
       </Pressable>
     </View>
   );
@@ -1187,7 +1180,10 @@ export default function HadithTab() {
                 <View>
                   {activeList.isFetching && !activeList.isPending ? (
                     <Text
-                      style={[styles.refreshingText, { color: colors.mutedForeground }]}>
+                      style={[
+                        styles.refreshingText,
+                        { color: colors.mutedForeground },
+                      ]}>
                       جارٍ تحميل الصفحة {toArabicDigits(page)}…
                     </Text>
                   ) : null}
@@ -1199,7 +1195,10 @@ export default function HadithTab() {
                 activeList.isPending ? null : (
                   <View style={styles.searchFeedback}>
                     <Text
-                      style={[styles.searchFeedbackText, { color: colors.mutedForeground }]}>
+                      style={[
+                        styles.searchFeedbackText,
+                        { color: colors.mutedForeground },
+                      ]}>
                       لا توجد أحاديث في هذه الصفحة.
                     </Text>
                   </View>

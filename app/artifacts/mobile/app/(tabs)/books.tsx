@@ -25,6 +25,7 @@ import {
   isOfflineError,
   LoadingState,
   SearchBar,
+  Screen,
 } from "@/components/ui";
 import BookCard from "@/components/BookCard";
 import BookSearchSheet, {
@@ -56,7 +57,10 @@ function actionLabelFor(book: IslamicBook): string {
   if (book.readability === "readable" && capabilities.canReadByPage) {
     return "قراءة";
   }
-  if (capabilities.canDownload && (book.attachments?.length || book.downloadUrl)) {
+  if (
+    capabilities.canDownload &&
+    (book.attachments?.length || book.downloadUrl)
+  ) {
     return "PDF";
   }
   return "تفاصيل";
@@ -362,7 +366,7 @@ export default function BooksTab() {
   );
 
   return (
-    <View style={[styles.screen, { backgroundColor: colors.background }]}>
+    <Screen scroll={false} contentStyle={styles.screen}>
       <FlatList
         data={books}
         keyExtractor={(item) => item.id}
@@ -517,7 +521,7 @@ export default function BooksTab() {
         onSubmit={submitAdvanced}
         onReset={resetAdvanced}
       />
-    </View>
+    </Screen>
   );
 }
 
@@ -526,8 +530,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   listContent: {
-    paddingHorizontal: spacing.md,
     paddingTop: spacing.md,
+    paddingBottom: spacing.md,
   },
   scopeNote: {
     fontSize: typography.caption,
