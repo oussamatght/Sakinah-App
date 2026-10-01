@@ -12,6 +12,7 @@
     },
     "android": {
       "package": "com.sakinah.app",
+      "versionCode": 2,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#F7F4EC"
