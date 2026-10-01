@@ -1,11 +1,15 @@
-# 🌙 Sakinah (سكينة)
+# 🌙 Sakinah — سكينة
 
 <p align="center">
-  <strong>Your daily companion for Quran, remembrance, and prayer times</strong>
+  <strong>Your daily companion for Quran, remembrance, and prayer</strong>
 </p>
 
 <p align="center">
-  A complete, Arabic-first Islamic mobile app — free, open, and built with no commercial intent whatsoever.
+  An Arabic-first Islamic mobile app for Quran, Hadith, Adhkar, Tasbih, Qibla, and prayer times.
+</p>
+
+<p align="center">
+  <strong>Free · Open Source · No Ads · No Accounts · Privacy First</strong>
 </p>
 
 <p align="center">
@@ -13,89 +17,216 @@
   <img src="https://img.shields.io/badge/Expo-000020?style=for-the-badge&logo=expo&logoColor=white" alt="Expo" />
   <img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" />
   <img src="https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white" alt="SQLite" />
-  <img src="https://img.shields.io/badge/React_Query-FF4154?style=for-the-badge&logo=reactquery&logoColor=white" alt="React Query" />
+  <img src="https://img.shields.io/badge/TanStack_Query-FF4154?style=for-the-badge&logo=reactquery&logoColor=white" alt="TanStack Query" />
 </p>
 
 ---
 
 ## 📖 About
 
-**Sakinah** is an Islamic mobile app that brings together the Holy Quran, Prophetic hadiths, adhkar and tasbih, and accurate prayer times, in one calm, simple experience — fully in Arabic, right-to-left (RTL) from the ground up.
+**Sakinah (سكينة)** is a free, Arabic-first Islamic mobile application designed to bring essential daily worship tools into one calm and simple experience.
 
-This project is built as an act of **Sadaqah Jariyah** (ongoing charity): work intended purely for the sake of Allah, meant to benefit Muslims in reading the Quran, keeping up with remembrance, and knowing their prayer times — free of charge, free of ads, and free of any data collection.
+The app focuses on:
 
-> *"When a person dies, their deeds come to an end except for three: ongoing charity, beneficial knowledge, or a righteous child who prays for them."*
+* 📖 Quran
+* 🕌 Prayer times
+* 🧭 Qibla
+* 📿 Adhkar & Tasbih
+* 🗣️ Hadith
+* ⭐ Favorites
+* 🎯 Daily Wird
+* ⚙️ Personal settings
+
+The interface is designed **RTL-first** and optimized primarily for Arabic users.
+
+Sakinah is being developed as a **Sadaqah Jariyah (صدقة جارية)** project, with no commercial purpose, no advertisements, and no user accounts.
 
 ---
 
-## ✨ Key Features
+## ✨ Features
 
-### 📗 Holy Quran
-- Complete Mushaf text — all 114 surahs
-- Browse by surah or by juz (the 30 parts)
-- Tafsir (interpretation) available on tap for any verse
-- Audio recitation (Mishary Alafasy by default, with reciter selection)
-- Adjustable Quran text size for comfortable reading
-- **Bookmark any verse to favorites** with one tap
-- **Automatic reading position** — the app remembers where you left off and shows a "Continue Reading" card on the home screen
-- **Fully offline reading** — download the entire Mushaf (~2 MB) once and read anywhere without an internet connection
+### 📖 Quran
+
+* Complete Quran — all **114 Surahs**
+* Browse by Surah
+* Browse by Juz
+* Verse-level Tafsir
+* Mishary Alafasy recitation
+* Reciter selection
+* Adjustable Quran font size
+* Verse favorites/bookmarks
+* Automatic reading-position tracking
+* "Continue Reading" on the home screen
+* Offline Quran reading after downloading the required content
 
 ### 🕌 Prayer Times
-- Accurate calculation of the five daily prayers based on your location
-- Hijri date shown alongside the Gregorian date
-- Countdown to the next prayer
-- **Real adhan notification** — a genuine call-to-prayer sound plays when each prayer time begins, not a silent system alert
-- **Offline fallback** — the last known prayer times are cached and shown with a clear notice when there's no connection
 
-### 🧭 Qibla Direction
-- Live compass based on device location and magnetic heading sensor
-- Smooth, real-time direction update wherever you are
+* Five daily prayer times
+* Location-based calculation
+* Hijri date
+* Gregorian date
+* Next-prayer countdown
+* Prayer notifications
+* Adhan notification support
+* Cached prayer times for offline fallback
+* Clear indication when displayed times come from cached data
 
-### 📿 Tasbih (Dhikr Counter)
-- Simple tap-to-count dhikr counter
-- Type in any dhikr phrase you want to repeat
-- Counter and history saved locally on your device
-- Light haptic feedback on every tap
+### 🧭 Qibla
 
-### 🗣️ Hadith Collection
-- Browse the nine canonical hadith books (Sahih al-Bukhari, Sahih Muslim, Sunan Abi Dawud, Tirmidhi, Nasa'i, Ibn Majah, Musnad Ahmad, Muwatta Malik, Sunan al-Darimi)
-- Thematic categories (aqeedah, fiqh, seerah, manners, and more)
-- **Color-coded grade badge** for every hadith: green for Sahih, yellow for Hasan, red for Da'if
-- Save any hadith to favorites
-- Previously browsed hadiths are cached for offline reading
+* Live Qibla direction
+* Device location
+* Magnetic heading sensor
+* Real-time compass updates
+* Designed for use while traveling
+
+### 📿 Adhkar & Tasbih
+
+* Morning and evening remembrance
+* Dhikr text and repetitions
+* Source information where available
+* Simple Tasbih counter
+* Custom dhikr phrases
+* Local counter history
+* Haptic feedback
+* Works without an internet connection
+
+### 🗣️ Hadith
+
+Browse a collection of major Hadith books, including:
+
+* Sahih al-Bukhari
+* Sahih Muslim
+* Sunan Abi Dawud
+* Jami' al-Tirmidhi
+* Sunan al-Nasa'i
+* Sunan Ibn Majah
+* Musnad Ahmad
+* Muwatta Malik
+* Sunan al-Darimi
+
+Additional features:
+
+* Browse by book
+* Browse by category/topic
+* Hadith search
+* Hadith source information
+* Save Hadith to favorites
+* Previously loaded Hadith can remain available offline
+
+> Hadith grading is displayed only when a reliable source provides grading information. The app does not invent or infer grades.
 
 ### ⭐ Favorites
-- One place to collect everything you've saved: verses and hadiths
-- Quick access to revisit what matters to you
 
-### 🎯 Daily Wird (Reading Goal)
-- Set a daily reading target (pages or juz)
-- Automatic progress tracking
-- Encourages consistency by keeping your streak in view
+A unified place for saved content:
+
+* Quran verses
+* Hadiths
+* Other supported saved items
+
+Everything is stored locally on the device.
+
+### 🎯 Daily Wird
+
+Set a personal Quran reading goal and track your progress.
+
+Possible goals include:
+
+* Pages per day
+* Juz per day
+* Daily progress
+* Reading streak
+
+The goal is to encourage consistency without turning worship into a competition.
 
 ### ⚙️ Settings
-- Theme control (light, dark, or automatic)
-- Adjustable Quran text size
-- Default reciter selection
-- Toggle prayer time and adhan notifications
-- All data stays on your device — nothing is sent to any external server
+
+* Light / Dark / System theme
+* Quran font-size control
+* Reciter selection
+* Prayer notification settings
+* Adhan settings
+* Local data management
+* Personal reading preferences
 
 ---
 
-## 🌐 Offline-First
+# 📱 Offline-First
 
-Sakinah keeps working even when your connection doesn't:
+Sakinah is designed to remain useful even when the internet is unavailable.
 
-| Content | Offline behavior |
-|---|---|
-| Holy Quran | Fully available after a one-time download |
-| Hadiths | Everything previously browsed + all favorites remain accessible |
-| Prayer Times | Last known times are shown with a clear offline notice |
-| Adhkar & Tasbih | Work fully with no connection required at all |
+| Feature         | Offline behavior                                 |
+| --------------- | ------------------------------------------------ |
+| 📖 Quran        | Available offline after local data is downloaded |
+| 🗣️ Hadith      | Previously loaded content remains available      |
+| ⭐ Favorites     | Stored locally                                   |
+| 🎯 Wird         | Stored locally                                   |
+| 📿 Tasbih       | Fully offline                                    |
+| 🤲 Adhkar       | Fully offline                                    |
+| 🕌 Prayer Times | Uses the latest available cached times           |
+| 🧭 Qibla        | Uses the device's location and sensors           |
+
+The app does not require an account or cloud synchronization for personal data.
 
 ---
 
-## 🛠️ Tech Stack
+# 🏗️ Architecture
+
+Sakinah follows a local-first architecture with a clear separation between UI, data fetching, and local persistence.
+
+```text
+┌──────────────────────────────┐
+│          React Native        │
+│          Expo Router         │
+└──────────────┬───────────────┘
+               │
+               ▼
+┌──────────────────────────────┐
+│        UI / Screens          │
+│  Quran · Hadith · Prayer    │
+│  Qibla · Adhkar · Settings  │
+└──────────────┬───────────────┘
+               │
+               ▼
+┌──────────────────────────────┐
+│       TanStack Query         │
+│    Fetching · Caching        │
+└──────────────┬───────────────┘
+               │
+       ┌───────┴────────┐
+       ▼                ▼
+┌──────────────┐ ┌───────────────┐
+│ Remote APIs  │ │ Local Storage │
+│ Quran        │ │ SQLite        │
+│ Hadith       │ │ AsyncStorage  │
+│ Prayer       │ │               │
+└──────────────┘ └───────────────┘
+```
+
+### API Layer
+
+External APIs are accessed through a shared HTTP layer responsible for:
+
+* Request handling
+* Timeout management
+* Error normalization
+* Network error detection
+* In-flight request deduplication
+* JSON parsing
+
+This keeps provider-specific logic inside files such as:
+
+```text
+lib/api/
+├── http.ts
+├── quran.ts
+├── hadith.ts
+├── adhkar.ts
+└── prayer.ts
+```
+
+---
+
+# 🛠️ Tech Stack
 
 <p align="left">
   <img src="https://img.shields.io/badge/React_Native-20232A?style=flat-square&logo=react&logoColor=61DAFB" alt="React Native" />
@@ -103,59 +234,130 @@ Sakinah keeps working even when your connection doesn't:
   <img src="https://img.shields.io/badge/Expo_Router-000020?style=flat-square&logo=expo&logoColor=white" alt="Expo Router" />
   <img src="https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript" />
 </p>
+
 <p align="left">
   <img src="https://img.shields.io/badge/SQLite-003B57?style=flat-square&logo=sqlite&logoColor=white" alt="SQLite" />
   <img src="https://img.shields.io/badge/AsyncStorage-6E4C13?style=flat-square&logo=react&logoColor=white" alt="AsyncStorage" />
-  <img src="https://img.shields.io/badge/TanStack_Query-FF4154?style=flat-square&logo=reactquery&logoColor=white" alt="React Query" />
+  <img src="https://img.shields.io/badge/TanStack_Query-FF4154?style=flat-square&logo=reactquery&logoColor=white" alt="TanStack Query" />
 </p>
+
 <p align="left">
   <img src="https://img.shields.io/badge/Expo_Notifications-000020?style=flat-square&logo=expo&logoColor=white" alt="Expo Notifications" />
   <img src="https://img.shields.io/badge/Expo_Location-000020?style=flat-square&logo=expo&logoColor=white" alt="Expo Location" />
+  <img src="https://img.shields.io/badge/Expo_Sensors-000020?style=flat-square&logo=expo&logoColor=white" alt="Expo Sensors" />
   <img src="https://img.shields.io/badge/EAS_Build-000020?style=flat-square&logo=expo&logoColor=white" alt="EAS Build" />
 </p>
 
-| Layer | Technology |
-|---|---|
-| Mobile app | Expo (React Native) + expo-router |
-| Language | TypeScript |
-| Local storage | SQLite + AsyncStorage |
-| Data fetching / caching | TanStack Query (React Query) |
-| Notifications | expo-notifications |
-| Location & compass | expo-location + expo-sensors |
-| Build & distribution | EAS Build |
+| Layer             | Technology          |
+| ----------------- | ------------------- |
+| Mobile            | React Native + Expo |
+| Navigation        | Expo Router         |
+| Language          | TypeScript          |
+| Data fetching     | TanStack Query      |
+| Local database    | SQLite              |
+| Local preferences | AsyncStorage        |
+| Notifications     | Expo Notifications  |
+| Location          | Expo Location       |
+| Sensors           | Expo Sensors        |
+| Builds            | EAS Build           |
 
 ---
 
-## 📚 Content Sources
+# 📚 Content & Data Sources
 
-The app relies on trusted, open Islamic content sources:
+Sakinah uses external services and publicly available datasets for different parts of the application.
 
-- **Quran text & tafsir**: alquran.cloud
-- **Audio recitation**: quran.com
-- **Hadith collections**: hadeethenc.com and the canonical nine-book databases
-- **Prayer times**: aladhan.com (calculation method: Muslim World League)
+| Content             | Source                                          |
+| ------------------- | ----------------------------------------------- |
+| Quran text          | alquran.cloud                                   |
+| Quran audio         | Quran.com / supported recitation providers      |
+| Tafsir              | alquran.cloud                                   |
+| Hadith              | HadeethEnc and other documented Hadith datasets |
+| Prayer calculations | AlAdhan                                         |
 
-All sources are public and open. The app does not collect or share any personal user data with any party.
+Source information is preserved where available so that users can identify the origin of religious content.
+
+> **Important:** External APIs and datasets can change, become unavailable, or contain different metadata. The application therefore avoids presenting unsupported information as fact.
 
 ---
 
-## 🚀 Running Locally
+# 🔐 Privacy
+
+Privacy is a core design principle of Sakinah.
+
+### No account required
+
+There is no:
+
+* Sign-up
+* Login
+* Password
+* User profile
+
+### Local-first personal data
+
+The following information is stored locally:
+
+* Favorites
+* Reading position
+* Wird progress
+* Settings
+* Tasbih data
+* Cached content
+
+### Location
+
+Location may be accessed when required for:
+
+* Prayer-time calculation
+* Qibla direction
+
+The application does not maintain a personal location profile.
+
+---
+
+# 🚀 Getting Started
+
+## Requirements
+
+Make sure you have:
+
+* Node.js
+* npm
+* Expo
+* Android Studio or a physical Android device for Android development
+
+## Installation
 
 ```bash
-# 1) Install dependencies
 cd app/artifacts/mobile
 npm install
-
-# 2) Start the dev server
-npx expo start
-
-# 3) Open the app
-# Scan the QR code with Expo Go, or run it on an Android/iOS emulator
 ```
 
-> Note: some features (like real adhan sound notifications) require a full development build via EAS and won't work completely inside the standard Expo Go app.
+## Start the development server
 
-### Building an installable version (APK / Development Build)
+```bash
+npx expo start
+```
+
+Then:
+
+* Scan the QR code with a compatible device
+* Or run the application on an Android/iOS emulator
+
+---
+
+# 📦 Development Build
+
+Some native features require a development build rather than standard Expo Go.
+
+For example:
+
+* Advanced notification behavior
+* Custom notification sounds
+* Certain native modules
+
+Create a development Android build with:
 
 ```bash
 npm install -g eas-cli
@@ -165,33 +367,58 @@ eas build --profile development --platform android
 
 ---
 
-## 🔒 Privacy
+# 🧪 Project Status
 
-- No sign-up or user accounts
-- All your data (favorites, wird progress, settings) is stored locally on your device only
-- No personal data is collected, sold, or shared with any third party
-- Location is used only to calculate prayer times and Qibla direction — it is never stored or transmitted to any server
+Sakinah is an actively developed open-source project.
 
----
+Some features and data providers may still be evolving.
 
-## 🤲 Project Intention
+Current development priorities include:
 
-This project is offered for free and without expectation of return, in the hope that it benefits everyone who reads from it or listens to it, and that Allah places it in the scale of good deeds for everyone who contributed to it, shared it, or pointed someone toward it.
-
-Anyone who contributed an idea, code, a prayer, or simply shared this app with someone who could benefit from it — may their reward be with Allah.
-
-> *"Whoever guides someone to goodness will have a reward like the one who did it."*
-
-We ask Allah to accept this work purely for His sake, and to benefit through it everyone who reads a verse, keeps a remembrance, or establishes a prayer on time.
+* Improving Quran UX
+* Improving Hadith browsing and search
+* Expanding offline support
+* Improving prayer notifications
+* Refining Qibla accuracy and UX
+* Improving Arabic localization
+* Expanding the Islamic library
+* Strengthening source attribution and data validation
 
 ---
 
-## 📄 License
+# 🤲 Project Intention
 
-This project is open source and available for everyone to use, modify, and distribute, on the condition that it remains free for the end user.
+Sakinah is developed with the intention of being a **Sadaqah Jariyah (صدقة جارية)**.
+
+The project is free to use and has no commercial purpose.
+
+The hope is that it helps Muslims:
+
+* Read the Quran
+* Remember Allah
+* Learn beneficial knowledge
+* Keep track of prayer times
+* Build consistent habits of worship
+
+> **"When a person dies, his deeds come to an end except for three: ongoing charity, beneficial knowledge, or a righteous child who prays for him."**
+> — Sahih Muslim
+
+We ask Allah to accept this work, make it beneficial, and reward everyone who contributes to it, improves it, shares it, or benefits from it.
+
+---
+
+# 📄 License
+
+This project is open source.
+
+The project is intended to remain **free for end users**.
+
+See the repository license for the exact terms governing modification and redistribution.
 
 ---
 
 <p align="center">
-  May Allah make this a source of lasting benefit, and an ongoing charity after all other deeds have ceased 🤲
+  <strong>🌙 Sakinah — سكينة</strong>
+  <br />
+  <sub>Built with the hope of becoming a source of lasting benefit.</sub>
 </p>
