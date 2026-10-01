@@ -16,33 +16,33 @@ function consoleLines() {
   try {
     await H.boot(page);
 
-    H.state.phase = "books-search";
+    H.state.phase = "books-tab";
     await H.clickText(page, "الكتب");
-    await H.sleep(2500);
+    await H.sleep(4000);
 
-    // ابحث بكلمة عربية تصل إلى إسلاميك
-    H.state.phase = "search";
-    await H.typeInto(page, "ابحث في شجرة الكتب", "صحيحة");
-    await H.sleep(8000);
+    // تصفّح تصنيف إسلاميك «تفسير» ⇒ النتائج من islamic.app فقط (بلا بحث نصّي
+    // قد لا يصل إليه، وبلا اعتماد على ترتيب دمج المصادر).
+    H.state.phase = "browse-genre";
+    const browsed = await H.clickLabel(page, "تصفح تفسير");
+    console.log("browsed islamicapp genre:", browsed);
+    await H.sleep(9000);
 
-    console.log("---- LIST (first 1000) ----");
-    console.log((await H.bodyText(page)).slice(0, 1000));
+    console.log("---- LIST (first 1200) ----");
+    console.log((await H.bodyText(page)).slice(0, 1200));
 
-    // افتح أول بطاقة كتاب. تحذير: "فتح " يطابق اختصارات الشاشة الرئيسية
-    // («فتح مواقيت الصلاة»…)، فنقتصد بالبطاقة التي تحمل شارة مصدر
-    // (تراث / إسلام هاوس / إسلاميك / PDF) — هذه بطاقة كتاب قطعًا.
+    // افتح أول بطاقة كتاب من **إسلاميك** (الشارة "إسلاميك" على البطاقة)،
+    // لأنها المصدر الذي كنا نظنّ أنه بلا قراءة. تحذير: "فتح " يطابق
+    // اختصارات الشاشة الرئيسية («فتح مواقيت الصلاة»…) فنقتصد بالبطاقة.
     H.state.phase = "open-book";
     const cardLabel = await page.evaluate(() => {
-      const hit = Array.from(document.querySelectorAll("[aria-label]")).find((n) => {
-        const label = n.getAttribute("aria-label") || "";
-        const text = n.innerText || "";
-        const isCard =
-          text.includes("إسلاميك") ||
-          text.includes("إسلام هاوس") ||
-          text.includes("تراث") ||
-          text.includes("PDF");
-        return isCard && label.startsWith("فتح ");
-      });
+      const cards = Array.from(document.querySelectorAll("[aria-label]")).filter(
+        (n) => {
+          const label = n.getAttribute("aria-label") || "";
+          const text = n.innerText || "";
+          return label.startsWith("فتح ") && text.includes("إسلاميك");
+        },
+      );
+      const hit = cards[0];
       if (!hit) return null;
       hit.scrollIntoView({ block: "center" });
       hit.click();
@@ -78,6 +78,14 @@ function consoleLines() {
     console.log("\nreader screen open:", readerOpen);
     console.log("reader shows error state:", hasError);
     console.log("reader visible text length:", readerText.replace(/\s+/g, " ").trim().length);
+
+    // انتقل «التالي»: يجب أن يظهر نصّ مختلف (لا نفس الصفحة مكرّرة).
+    const beforeNext = readerText.replace(/\s+/g, " ").trim();
+    await H.clickText(page, "التالي");
+    await H.sleep(7000);
+    const afterNext = (await H.bodyText(page)).replace(/\s+/g, " ").trim();
+    console.log("next-page text changed:", afterNext !== beforeNext);
+    console.log("next-page length:", afterNext.length);
 
     console.log("\n---- DUPLICATE-KEY / UNDEFINED-DATA ----");
     const bad = consoleLines().filter((t) => /same key|cannot be undefined/i.test(t));
